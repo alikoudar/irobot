@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # ==================== DATABASES ====================
+  postgres:
+    image: postgres:16-alpine
+    container_name: irobot-postgres-dev
+    environment:
+      POSTGRES_DB: irobot_dev
+      POSTGRES_USER: irobot_user
+      POSTGRES_PASSWORD: irobot_pass_dev
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U irobot_user -d irobot_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - irobot-network
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: irobot-redis-dev
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - irobot-network
+
+  weaviate:
+    image: semitechnologies/weaviate:1.23.0
+    container_name: irobot-weaviate-dev
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      ENABLE_MODULES: ''
+      CLUSTER_HOSTNAME: 'node1'
+    volumes:
+      - weaviate_data_dev:/var/lib/weaviate
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=3", "--spider", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - irobot-network
+
+  # ==================== BACKEND ====================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-backend-dev
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - uploads_dev:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    networks:
+      - irobot-network
+
+  # ==================== FRONTEND ====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: irobot-frontend-dev
+    command: npm run dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost/api
+    networks:
+      - irobot-network
+
+  # ==================== NGINX ====================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: irobot-nginx-dev
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - irobot-network
+
+volumes:
+  postgres_data_dev:
+  redis_data_dev:
+  weaviate_data_dev:
+  uploads_dev:
+
+networks:
+  irobot-network:
+    driver: bridge

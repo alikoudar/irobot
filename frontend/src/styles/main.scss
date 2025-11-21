@@ -1,0 +1,47 @@
+// BEAC Color Variables
+$primary-color: #005ca9;
+$secondary-color: #c2a712;
+$red: #E30613;
+$brown: #bf8850;
+$green: #009640;
+$purple: #662483;
+$pink: #ea5297;
+$yellow: #ffdd00;
+$dark-blue: #001f3f;
+$black: #000000;
+
+// Theme variables
+:root {
+  --primary-color: #{$primary-color};
+  --secondary-color: #{$secondary-color};
+  --text-color: #333333;
+  --bg-color: #ffffff;
+  --border-color: #e0e0e0;
+}
+
+// Dark theme
+[data-theme="dark"] {
+  --primary-color: #{$primary-color};
+  --secondary-color: #{$secondary-color};
+  --text-color: #e0e0e0;
+  --bg-color: #1a1a1a;
+  --border-color: #333333;
+}
+
+// Global styles
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text-color);
+  background-color: var(--bg-color);
+}
+
+// Smooth transitions
+* {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
