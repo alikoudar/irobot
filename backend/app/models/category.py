@@ -1,5 +1,5 @@
 """Category model."""
-from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -16,16 +16,20 @@ class Category(Base):
     # Primary key
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     
+    # Foreign key
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    
     # Info
     name = Column(String(100), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
-    color = Column(String(7), nullable=True)  # Hex color code
+    color = Column(String(7), nullable=True)  # Hex color code (ex: #005ca9)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     
     # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
     documents = relationship("Document", back_populates="category")
     
     def __repr__(self):

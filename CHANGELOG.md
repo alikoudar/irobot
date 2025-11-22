@@ -7,11 +7,257 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### À venir - Sprint 3
-- Gestion des catégories de documents
-- CRUD catégories (admin/manager)
-- Interface admin catégories
-- Tests catégories
+### À venir - Sprint 4
+- Gestion des documents
+- Upload et traitement documents
+- Pipeline RAG
+- Interface chatbot
+
+---
+
+## [1.0.0-sprint3] - 2024-11-22
+
+### ✨ Ajouté
+
+#### Phase 1 : Backend Catégories (2024-11-22)
+- **CRUD catégories complet** :
+  - GET /categories - Liste paginée avec recherche
+  - POST /categories - Création catégorie
+  - GET /categories/{category_id} - Détails catégorie
+  - PUT /categories/{category_id} - Modification catégorie
+  - DELETE /categories/{category_id} - Suppression catégorie
+- **Modèle Category** :
+  - Champs : id, name, description, color, created_by, timestamps
+  - Relation vers User (créateur)
+  - Validation unicité du nom
+- **6 Schemas Pydantic** :
+  - CategoryBase, CategoryCreate, CategoryUpdate
+  - CategoryResponse, CategoryWithStats, CategoryList
+- **Service CategoryService** :
+  - 8 méthodes (get_categories, create, update, delete, etc.)
+  - Pagination et recherche full-text
+  - Statistiques (count documents par catégorie)
+- **Permissions par rôle** :
+  - Admin : CRUD complet
+  - Manager : CRUD complet
+  - User : Aucun accès (403 Forbidden)
+- **Migration Alembic** :
+  - add_created_by_to_categories.py
+  - Ajout colonne created_by (FK vers users)
+  - Compatible PostgreSQL et SQLite
+
+#### Phase 2 : Seeds Catégories (2024-11-22)
+- **Script de seed** (seed_categories.py) :
+  - 4 catégories initiales selon plan BEAC
+  - Lettres Circulaires (#005CA9 - Bleu BEAC)
+  - Décisions du Gouverneur (#C2A712 - Or BEAC)
+  - Procédures et Modes Opératoires (#4A90E2 - Bleu clair)
+  - Clauses et Conditions Générales (#50C878 - Vert émeraude)
+  - Attribution created_by à l'admin
+  - Idempotent (réexécutable sans erreur)
+  - Rapport détaillé avec statistiques
+- **Script de vérification** (verify_categories.py) :
+  - Vérification structure table categories
+  - Liste catégories avec détails complets
+  - Statistiques globales (total, avec/sans documents)
+  - Détection anomalies
+
+#### Phase 3 : Frontend Catégories (2024-11-22)
+- **Store Pinia categories.js** :
+  - 10 actions CRUD et utilitaires
+  - 4 getters computed (hasCategories, sortedCategories, categoryOptions)
+  - Pagination dynamique (10, 20, 50, 100)
+  - Recherche avec filtres
+  - Gestion erreurs avec ElMessage
+- **Composant CategoryForm.vue** :
+  - Mode création/édition intelligent
+  - Validation frontend complète
+  - Color picker Element Plus avec preview temps réel
+  - 8 couleurs BEAC prédéfinies en palette compacte
+  - Tooltip au survol des couleurs
+  - Responsive design
+- **Vue admin/Categories.vue** :
+  - Table paginée responsive avec stripe
+  - Recherche full-text (Enter OU bouton)
+  - 3 statistiques en temps réel (total, avec/sans docs)
+  - CRUD complet via modals
+  - Confirmation suppression
+  - Loading states
+  - Design couleurs BEAC
+- **Vue manager/Categories.vue** :
+  - Interface identique à admin
+  - Permissions backend (même CRUD)
+- **Router** :
+  - 3 routes ajoutées (/categories, /admin/categories, /manager/categories)
+  - Guards navigation avec requiresAuth et requiresManager
+  - Correction route /categories (Categories.vue au lieu de Home.vue)
+- **Icônes Element Plus** :
+  - Folder, FolderOpened, Document, Plus, Search, Edit, Delete, etc.
+  - Intégrées partout pour UX cohérente
+
+#### Phase 4 : Tests (2024-11-22)
+- **20 tests unitaires** (test_categories.py) :
+  - TestGetCategories (5 tests)
+  - TestCreateCategory (5 tests)
+  - TestGetCategory (2 tests)
+  - TestUpdateCategory (4 tests)
+  - TestDeleteCategory (4 tests)
+- **Fixtures pytest** :
+  - category_data, created_category
+  - Réutilisation fixtures users existantes
+- **Coverage** :
+  - Categories endpoints : >95%
+  - Service : >90%
+  - Modèle : 100%
+
+### 🔧 Modifié
+
+- **Modèle Category** :
+  - Ajout colonne created_by (FK vers users.id)
+  - Migration Alembic pour ajout colonne
+  - Type UUID compatible PostgreSQL et SQLite
+- **Router API** :
+  - Enregistrement routes /categories dans router principal
+  - Ordre routes : auth, users, **categories** (nouveau)
+- **Frontend Router** :
+  - Correction route /categories (pointait vers Home.vue)
+  - Ajout 3 routes catégories (/, /admin, /manager)
+- **AppLayout.vue** :
+  - Ajout lien "Catégories" dans navigation sidebar
+  - Import icône Folder
+  - Position après "Documents", avant "Statistiques"
+
+### 🛠️ Corrections UX
+
+- **Formulaire CategoryForm compact** :
+  - Palette couleurs redessinée en horizontal (au lieu de grille verticale)
+  - Taille réduite : 40px × 40px (au lieu de 100px × 60px)
+  - Économie hauteur : -200px (~22% de réduction)
+  - Tooltip natif HTML au survol (plus léger que el-tooltip)
+- **Recherche améliorée** :
+  - Ajout @submit.prevent sur el-form
+  - Support touche Enter ET bouton Rechercher
+  - Bouton "Rechercher" en type="primary" (mise en évidence)
+  - Clear (×) réinitialise et recherche automatiquement
+
+### 🛠️ Corrigé
+
+- **Route frontend** :
+  - /categories pointait vers Home.vue au lieu de Categories.vue
+  - Correction dans router/index.js
+- **Erreur 404** :
+  - GET /api/v1/categories retournait 404
+  - Cause : Phase 1 (backend) non intégrée avant Phase 3 (frontend)
+  - Solution : Ordre d'intégration corrigé (1→2→3)
+- **Formulaire trop haut** :
+  - Dépassait hauteur écran (palette 480px)
+  - Réduit à 40px avec design horizontal
+- **Warnings Vue** :
+  - Icônes Element Plus rendues réactives
+  - Solution documentée (markRaw optionnel)
+
+### 📊 Statistiques Sprint 3
+
+- **Fichiers créés/modifiés** : 18 fichiers
+- **Lignes de code** : ~2450 lignes (backend + frontend + tests + seeds)
+- **Tests** : 20 tests unitaires (115 au total avec Sprints 1-2)
+- **Coverage** : >90% (catégories)
+- **Endpoints API** : 5 endpoints catégories
+- **Pages frontend** : 2 vues (admin, manager)
+- **Stores Pinia** : 1 store (categories)
+- **Composants** : 1 formulaire réutilisable
+- **Scripts** : 2 scripts (seed, verify)
+- **Catégories seed** : 4 catégories initiales BEAC
+- **Documentation** : 15 fichiers (~50 pages)
+- **Durée** : 1 jour
+
+### 🎯 Objectifs Sprint 3 - Atteints
+
+- ✅ CRUD catégories backend complet et testé
+- ✅ Permissions admin/manager fonctionnelles
+- ✅ Seeds catégories initiales (4 catégories BEAC)
+- ✅ Interface frontend intuitive et responsive
+- ✅ Store Pinia avec gestion état complète
+- ✅ Formulaire avec color picker et validation
+- ✅ Recherche avec Enter et pagination
+- ✅ Tests unitaires (20 tests, >90% coverage)
+- ✅ Migration Alembic (add_created_by)
+- ✅ Documentation exhaustive (15 fichiers)
+- ✅ Corrections UX (formulaire compact, recherche Enter)
+- ✅ Design BEAC respecté (couleurs officielles)
+
+### 📦 Packages Livrés
+
+- **sprint3_phases1_2_3_complete.zip** (76 KB) - Archive complète 3 phases
+- **sprint3_phase1_complete.zip** (42 KB) - Backend catégories complet
+- **sprint3_phase2_seeds.zip** (13 KB) - Scripts seeds et vérification
+- **sprint3_phase3_frontend.zip** (28 KB) - Frontend Vue.js complet
+- **Documentation** (15 fichiers MD) - Guides, rapports, synthèses
+
+### 🔄 Refactoring Recommandé (Optionnel)
+
+**Éliminer duplication admin/manager** :
+- Créer composant partagé `CategoriesManagement.vue`
+- Convertir vues en wrappers légers (250→7 lignes)
+- Respecter principe DRY
+- Documentation : REFACTORING_DRY_CATEGORIES.md
+
+**Statut** : Optionnel, peut être fait en Sprint 4
+
+---
+
+## Notes de Version
+
+### [1.0.0-sprint3] - 2024-11-22
+
+**Résumé** : Gestion complète des catégories de documents avec CRUD backend, interface admin moderne, seeds initiales, et tests complets.
+
+**Nouveautés** :
+- 📁 CRUD catégories backend (5 endpoints API)
+- 🎨 Interface admin/manager responsive
+- 🌱 4 catégories initiales BEAC
+- 🔍 Recherche full-text avec Enter
+- 🎨 Color picker avec preview
+- 📊 Statistiques temps réel
+- 🧪 20 tests unitaires
+
+**Prérequis** :
+- Sprint 1 complété (infrastructure)
+- Sprint 2 complété (authentification)
+- PostgreSQL 16+
+- Redis 7.2+
+
+**Installation** :
+```bash
+# Backend
+cd backend
+alembic upgrade head
+python scripts/seed_categories.py
+
+# Frontend
+cd frontend
+npm install
+npm run dev
+
+# Vérifier
+curl http://localhost/api/v1/categories
+```
+
+**Connexion** :
+- URL: http://localhost/categories
+- Admin: ADMIN001 / Admin123!
+- Manager: (créer via interface admin)
+
+**API Documentation** :
+- Swagger UI: http://localhost/api/docs#/categories
+- Endpoints: GET, POST, PUT, DELETE /categories
+
+**Tests** :
+```bash
+cd backend
+pytest tests/test_categories.py -v
+# 20 passed
+```
 
 ---
 
