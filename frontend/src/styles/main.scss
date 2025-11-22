@@ -10,22 +10,13 @@ $yellow: #ffdd00;
 $dark-blue: #001f3f;
 $black: #000000;
 
-// Theme variables
+// Theme variables - Mode clair uniquement
 :root {
   --primary-color: #{$primary-color};
   --secondary-color: #{$secondary-color};
   --text-color: #333333;
   --bg-color: #ffffff;
   --border-color: #e0e0e0;
-}
-
-// Dark theme
-[data-theme="dark"] {
-  --primary-color: #{$primary-color};
-  --secondary-color: #{$secondary-color};
-  --text-color: #e0e0e0;
-  --bg-color: #1a1a1a;
-  --border-color: #333333;
 }
 
 // Global styles

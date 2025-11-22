@@ -1,14 +1,158 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/auth/Login.vue'),
+      meta: { requiresGuest: true, noLayout: true }
+    },
+    {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('../views/auth/ForgotPassword.vue'),
+      meta: { requiresGuest: true, noLayout: true }
+    },
+    {
+      path: '/change-password',
+      name: 'change-password',
+      component: () => import('../views/auth/ChangePassword.vue'),
+      meta: { requiresAuth: true, noLayout: true }
+    },
+    {
+      path: '/profile',
+      name: 'profile',
+      component: () => import('../views/Profile.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/',
-      name: 'home',
-      component: () => import('../views/Home.vue')
+      redirect: (to) => {
+        const authStore = useAuthStore()
+        if (authStore.isAuthenticated) {
+          return authStore.isAdmin ? '/admin/users' : '/chat'
+        }
+        return '/login'
+      }
+    },
+    {
+      path: '/chat',
+      name: 'chat',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/history',
+      name: 'history',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/feedbacks',
+      name: 'feedbacks',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/documents',
+      name: 'documents',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true, requiresManager: true }
+    },
+    {
+      path: '/categories',
+      name: 'categories',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true, requiresManager: true }
+    },
+    {
+      path: '/admin/users',
+      name: 'admin-users',
+      component: () => import('../views/admin/Users.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/dashboard',
+      name: 'admin-dashboard',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/stats',
+      name: 'admin-stats',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/logs',
+      name: 'admin-logs',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
+    },
+    {
+      path: '/admin/config',
+      name: 'admin-config',
+      component: () => import('../views/Home.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
     }
   ]
+})
+
+// Guards de navigation
+router.beforeEach(async (to, from, next) => {
+  const authStore = useAuthStore()
+
+  // Initialiser le user si on a un token
+  if (!authStore.currentUser && authStore.accessToken) {
+    try {
+      await authStore.fetchCurrentUser()
+    } catch (error) {
+      console.error('Error fetching current user:', error)
+    }
+  }
+
+  // Routes nécessitant authentification
+  if (to.meta.requiresAuth) {
+    if (!authStore.isAuthenticated) {
+      next({ name: 'login', query: { redirect: to.fullPath } })
+      return
+    }
+
+    // Forcer changement de mot de passe
+    if (authStore.mustChangePassword && to.name !== 'change-password') {
+      next({ name: 'change-password' })
+      return
+    }
+
+    // Vérifier rôle Admin
+    if (to.meta.requiresAdmin && !authStore.isAdmin) {
+      next({ name: 'chat' })
+      return
+    }
+
+    // Vérifier rôle Manager
+    if (to.meta.requiresManager && !authStore.canManageDocuments) {
+      next({ name: 'chat' })
+      return
+    }
+  }
+
+  // Routes pour invités (login)
+  if (to.meta.requiresGuest && authStore.isAuthenticated) {
+    if (authStore.mustChangePassword) {
+      next({ name: 'change-password' })
+    } else if (authStore.isAdmin) {
+      next({ name: 'admin-users' })
+    } else {
+      next({ name: 'chat' })
+    }
+    return
+  }
+
+  next()
 })
 
 export default router
