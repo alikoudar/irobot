@@ -10,6 +10,9 @@ from app.models.token_usage import TokenUsage, OperationType
 from app.models.exchange_rate import ExchangeRate
 from app.models.audit_log import AuditLog
 from app.models.system_config import SystemConfig
+from app.models.query_cache import QueryCache
+from app.models.cache_document_map import CacheDocumentMap
+from app.models.cache_statistics import CacheStatistics
 
 __all__ = [
     "User",
@@ -29,4 +32,7 @@ __all__ = [
     "AuditLog",
     "SystemConfig",
     "ExchangeRate",
+    "QueryCache",
+    "CacheDocumentMap",
+    "CacheStatistics",
 ]

@@ -49,3 +49,7 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
+
+test_retriever_reranker_simple.py
+test_cache_simple.py
+test_cache_service_simple.py

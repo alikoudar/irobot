@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 CACHE_PREFIX = "irobot:config:"
 
 # TTL par défaut du cache (5 minutes)
-DEFAULT_CACHE_TTL = 300
+DEFAULT_CACHE_TTL = 1800
 
 
 # =============================================================================

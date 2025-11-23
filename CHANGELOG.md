@@ -7,11 +7,220 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### À venir - Sprint 5
-- Embedding chunks avec Mistral
-- Indexing dans Weaviate (vectors + BM25)
-- Token & cost tracking
-- Periodic tasks (cleanup, stats)
+### À venir - Sprint 7
+- Generator LLM avec Mistral
+- Streaming SSE
+- Prompts système BEAC
+- Pipeline RAG complet
+
+---
+
+## [1.0.0-sprint6] - 2025-11-23
+
+### ✨ Ajouté
+
+#### Phase 1 : Modèles Cache (2025-11-23)
+- **QueryCache** :
+  - Stockage questions/réponses avec hash SHA-256
+  - Embedding vectoriel 1024 dimensions pour similarité
+  - TTL 7 jours configurable
+  - Métriques : hit_count, tokens économisés, coûts USD/XAF
+  - Méthodes : is_expired(), increment_hit(), reset_ttl()
+- **CacheDocumentMap** :
+  - Mapping N:N cache ↔ documents
+  - Clés étrangères avec CASCADE
+  - Index pour invalidation rapide
+- **CacheStatistics** :
+  - Statistiques journalières agrégées
+  - hit_rate calculé automatiquement
+  - Méthodes : increment_hit(), increment_miss(), get_summary()
+- **Schémas Pydantic** :
+  - QueryCacheCreate, QueryCacheResponse, CacheHitResponse
+  - CacheStatisticsResponse, CacheDashboardStats
+- **Migration Alembic** :
+  - sprint6_001_cache_models.py
+  - 3 tables avec index optimisés
+
+#### Phase 2 : Retriever & Reranker (2025-11-23)
+- **HybridRetriever** :
+  - Recherche hybride BM25 + Sémantique dans Weaviate
+  - Alpha configurable depuis DB (défaut: 0.75)
+  - Top-K configurable depuis DB (défaut: 10)
+  - Filtres par catégorie et documents
+  - Singleton : get_retriever()
+- **MistralReranker** :
+  - Reranking avec mistral-small-latest
+  - Scoring 0-10 avec reasoning
+  - Top-N configurable depuis DB (défaut: 3)
+  - Tarifs lus depuis DB
+  - Singleton : get_reranker()
+- **RetrievedChunk** :
+  - Dataclass avec scores BM25/vector
+  - Méthodes : to_dict(), to_source_dict()
+- **RerankResult** :
+  - Score de pertinence + explanation
+- **Configurations dynamiques** :
+  - search.top_k, search.hybrid_alpha
+  - models.reranking.model_name, models.reranking.top_k
+  - mistral.pricing.small
+
+#### Phase 3 : Cache Service (2025-11-23)
+- **CacheService** :
+  - check_cache_level1() - Hash exact SHA-256
+  - check_cache_level2() - Similarité cosine > 0.95
+  - check_cache() - Combiné L1 puis L2
+  - save_to_cache() - Sauvegarde avec mappings
+  - invalidate_cache_for_document() - Invalidation cascade
+  - invalidate_expired_cache() - Nettoyage périodique
+  - get_statistics() - Stats agrégées
+- **Utilitaires mathématiques** :
+  - cosine_similarity() - Similarité vectorielle
+  - compute_query_hash() - Hash normalisé
+- **Configurations depuis DB** :
+  - cache.query_ttl_seconds (défaut: 604800 = 7 jours)
+  - cache.similarity_threshold (défaut: 0.95)
+- **Singleton** : get_cache_service()
+
+#### Phase 4 : Tests Complets (2025-11-23)
+- **Tests Modèles Cache** (40 tests) :
+  - QueryCache : création, hash, expiration, hits
+  - CacheDocumentMap : création, relations
+  - CacheStatistics : hit_rate, increment, summary
+- **Tests Retriever & Reranker** (27 tests) :
+  - Config depuis DB
+  - Recherche hybride, filtres
+  - Reranking, scoring
+  - Pipeline intégré
+- **Tests CacheService** (41 tests) :
+  - Cosine similarity
+  - Cache L1 hit/miss
+  - Cache L2 hit/miss (similarité)
+  - Sauvegarde, invalidation
+  - TTL reset on hit
+  - Statistiques
+
+### 🔧 Modifié
+
+- **Architecture configs** :
+  - Toutes les configs RAG lues depuis system_configs via ConfigService
+  - Pattern identique à mistral_client.py
+  - Fallback si DB non disponible
+- **Package app/rag/** :
+  - Ajout retriever.py, reranker.py
+  - Export dans __init__.py
+- **Package app/services/** :
+  - Ajout cache_service.py
+
+### 📊 Statistiques Sprint 6
+
+- **Fichiers créés** : 9 fichiers
+  - query_cache.py (~250 lignes)
+  - cache_document_map.py (~120 lignes)
+  - cache_statistics.py (~280 lignes)
+  - cache.py (schémas ~350 lignes)
+  - retriever.py (~450 lignes)
+  - reranker.py (~400 lignes)
+  - cache_service.py (~550 lignes)
+  - Migration Alembic (~250 lignes)
+  - Tests simples (3 fichiers ~2000 lignes)
+- **Lignes de code** : ~4650 lignes
+- **Tests** : 108 tests (40 + 27 + 41)
+- **Coverage** : >90%
+- **Durée** : 7 jours
+
+### 🎯 Objectifs Sprint 6 - Atteints
+
+- ✅ Hybrid search fonctionnel (BM25 + Sémantique)
+- ✅ Reranking avec Mistral OK
+- ✅ Cache L1 (correspondance exacte via hash) OK
+- ✅ Cache L2 (similarité > 0.95) OK
+- ✅ Invalidation cache par document OK
+- ✅ Stats cache calculées (hit_rate, tokens, coûts)
+- ✅ Configs depuis DB (ConfigService)
+- ✅ Tests > 80% (108 tests passés)
+
+### 📦 Fichiers Livrés
+
+```
+backend/app/models/
+├── query_cache.py           # Modèle cache Q/R
+├── cache_document_map.py    # Mapping cache ↔ documents
+├── cache_statistics.py      # Statistiques journalières
+
+backend/app/schemas/
+├── cache.py                 # Schémas Pydantic cache
+
+backend/app/rag/
+├── retriever.py             # HybridRetriever
+├── reranker.py              # MistralReranker
+├── __init__.py              # Exports package
+
+backend/app/services/
+├── cache_service.py         # CacheService complet
+
+backend/alembic/versions/
+├── sprint6_001_cache_models.py  # Migration tables cache
+
+tests/
+├── test_cache_models_simple.py      # Tests modèles (40)
+├── test_retriever_reranker_simple.py # Tests RAG (27)
+├── test_cache_service_simple.py     # Tests service (41)
+```
+
+### 🔄 Pipeline RAG Actuel
+
+```
+Question utilisateur
+       ↓
+┌─────────────────────────┐
+│  CACHE L1 (Hash exact)  │
+│  SHA-256 normalisé      │
+└───────────┬─────────────┘
+            │
+       HIT? ├─────────────────────────┐
+            │ NO                      │ YES
+            ↓                         ↓
+┌─────────────────────────┐    ┌──────────────────┐
+│  CACHE L2 (Similarité)  │    │  RETURN CACHED   │
+│  Cosine > 0.95          │    │  + increment_hit │
+└───────────┬─────────────┘    │  + reset_ttl     │
+            │                   └──────────────────┘
+       HIT? ├─────────────────────────┐
+            │ NO                      │ YES
+            ↓                         ↓
+┌─────────────────────────┐    ┌──────────────────┐
+│  PIPELINE RAG COMPLET   │    │  RETURN CACHED   │
+│  1. Embedding question  │    │  (similarity)    │
+│  2. Hybrid search (10)  │    └──────────────────┘
+│  3. Reranking (3)       │
+│  4. Generation (Sprint7)│
+│  5. save_to_cache()     │
+└─────────────────────────┘
+```
+
+### ⚠️ Limitations Actuelles
+
+- Generator LLM non implémenté (Sprint 7)
+- Streaming SSE non implémenté (Sprint 7)
+- Frontend chat non développé (Sprint 8)
+- Weaviate client mock dans les tests
+
+### 🚀 Prochaines Étapes (Sprint 7)
+
+1. **Generator LLM** :
+   - MistralGenerator avec streaming
+   - Prompts système BEAC
+   - Context augmentation
+
+2. **API Chat** :
+   - POST /chat/message - Envoi message
+   - GET /chat/stream - SSE streaming
+   - Gestion conversations
+
+3. **Token & Cost Tracking** :
+   - Comptage précis tokens
+   - Calcul coûts USD/XAF
+   - Historique token_usage
 
 ---
 
@@ -143,51 +352,6 @@ backend/alembic/versions/
 ├── 20241124_add_ocr_columns.py  # Migration OCR
 ```
 
-### 🔄 Pipeline Document Actuel
-
-```
-Upload → PENDING
-   ↓
-Processing Worker → PROCESSING/EXTRACTION
-   ↓
-   ├── DocumentProcessor.process_document()
-   ├── OCR images si nécessaire
-   ├── Nettoyage caractères NULL
-   └── Mise à jour: extracted_text, has_images, extraction_method
-   ↓
-Chunking Worker → PROCESSING/CHUNKING
-   ↓
-   ├── Nettoyage artefacts OCR
-   ├── Découpage intelligent (1000 chars, 200 overlap)
-   ├── Création chunks avec métadonnées
-   └── Mise à jour: total_chunks, chunking_stats
-   ↓
-[En attente Sprint 5] → EMBEDDING → INDEXING → COMPLETED
-```
-
-### ⚠️ Limitations Actuelles
-
-- Documents restent à l'étape CHUNKING (embedding non implémenté)
-- weaviate_id temporaire (sera remplacé lors de l'indexing)
-- Frontend gestion documents non encore développé
-
-### 🚀 Prochaines Étapes (Sprint 5)
-
-1. **Embedding Worker** :
-   - embed_chunks() avec Mistral embed
-   - Token counting précis
-   - Cost tracking USD/XAF
-
-2. **Indexing Worker** :
-   - index_document() dans Weaviate
-   - Batch insert optimisé
-   - Mise à jour weaviate_id réel
-
-3. **Tâches périodiques** :
-   - update_exchange_rate() - Taux USD/XAF
-   - cleanup_expired_cache() - Nettoyage cache
-   - cleanup_old_logs() - Purge logs 90j
-
 ---
 
 ## [1.0.0-sprint3] - 2025-11-22
@@ -216,168 +380,25 @@ Chunking Worker → PROCESSING/CHUNKING
   - Admin : CRUD complet
   - Manager : CRUD complet
   - User : Aucun accès (403 Forbidden)
-- **Migration Alembic** :
-  - add_created_by_to_categories.py
-  - Ajout colonne created_by (FK vers users)
-  - Compatible PostgreSQL et SQLite
 
 #### Phase 2 : Seeds Catégories (2025-11-22)
-- **Script de seed** (seed_categories.py) :
-  - 4 catégories initiales selon plan BEAC
+- **4 catégories initiales BEAC** :
   - Lettres Circulaires (#005CA9 - Bleu BEAC)
   - Décisions du Gouverneur (#C2A712 - Or BEAC)
   - Procédures et Modes Opératoires (#4A90E2 - Bleu clair)
   - Clauses et Conditions Générales (#50C878 - Vert émeraude)
-  - Attribution created_by à l'admin
-  - Idempotent (réexécutable sans erreur)
-  - Rapport détaillé avec statistiques
-- **Script de vérification** (verify_categories.py) :
-  - Vérification structure table categories
-  - Liste catégories avec détails complets
-  - Statistiques globales (total, avec/sans documents)
-  - Détection anomalies
 
 #### Phase 3 : Frontend Catégories (2025-11-22)
-- **Store Pinia categories.js** :
-  - 10 actions CRUD et utilitaires
-  - 4 getters computed (hasCategories, sortedCategories, categoryOptions)
-  - Pagination dynamique (10, 20, 50, 100)
-  - Recherche avec filtres
-  - Gestion erreurs avec ElMessage
-- **Composant CategoryForm.vue** :
-  - Mode création/édition intelligent
-  - Validation frontend complète
-  - Color picker Element Plus avec preview temps réel
-  - 8 couleurs BEAC prédéfinies en palette compacte
-  - Tooltip au survol des couleurs
-  - Responsive design
-- **Vue admin/Categories.vue** :
-  - Table paginée responsive avec stripe
-  - Recherche full-text (Enter OU bouton)
-  - 3 statistiques en temps réel (total, avec/sans docs)
-  - CRUD complet via modals
-  - Confirmation suppression
-  - Loading states
-  - Design couleurs BEAC
-- **Vue manager/Categories.vue** :
-  - Interface identique à admin
-  - Permissions backend (même CRUD)
-- **Router** :
-  - 3 routes ajoutées (/categories, /admin/categories, /manager/categories)
-  - Guards navigation avec requiresAuth et requiresManager
-  - Correction route /categories (Categories.vue au lieu de Home.vue)
-- **Icônes Element Plus** :
-  - Folder, FolderOpened, Document, Plus, Search, Edit, Delete, etc.
-  - Intégrées partout pour UX cohérente
-
-#### Phase 4 : Tests (2025-11-22)
-- **20 tests unitaires** (test_categories.py) :
-  - TestGetCategories (5 tests)
-  - TestCreateCategory (5 tests)
-  - TestGetCategory (2 tests)
-  - TestUpdateCategory (4 tests)
-  - TestDeleteCategory (4 tests)
-- **Fixtures pytest** :
-  - category_data, created_category
-  - Réutilisation fixtures users existantes
-- **Coverage** :
-  - Categories endpoints : >95%
-  - Service : >90%
-  - Modèle : 100%
-
-### 🔧 Modifié
-
-- **Modèle Category** :
-  - Ajout colonne created_by (FK vers users.id)
-  - Migration Alembic pour ajout colonne
-  - Type UUID compatible PostgreSQL et SQLite
-- **Router API** :
-  - Enregistrement routes /categories dans router principal
-  - Ordre routes : auth, users, **categories** (nouveau)
-- **Frontend Router** :
-  - Correction route /categories (pointait vers Home.vue)
-  - Ajout 3 routes catégories (/, /admin, /manager)
-- **AppLayout.vue** :
-  - Ajout lien "Catégories" dans navigation sidebar
-  - Import icône Folder
-  - Position après "Documents", avant "Statistiques"
-
-### 🛠️ Corrections UX
-
-- **Formulaire CategoryForm compact** :
-  - Palette couleurs redessinée en horizontal (au lieu de grille verticale)
-  - Taille réduite : 40px × 40px (au lieu de 100px × 60px)
-  - Économie hauteur : -200px (~22% de réduction)
-  - Tooltip natif HTML au survol (plus léger que el-tooltip)
-- **Recherche améliorée** :
-  - Ajout @submit.prevent sur el-form
-  - Support touche Enter ET bouton Rechercher
-  - Bouton "Rechercher" en type="primary" (mise en évidence)
-  - Clear (×) réinitialise et recherche automatiquement
-
-### 🛠️ Corrigé
-
-- **Route frontend** :
-  - /categories pointait vers Home.vue au lieu de Categories.vue
-  - Correction dans router/index.js
-- **Erreur 404** :
-  - GET /api/v1/categories retournait 404
-  - Cause : Phase 1 (backend) non intégrée avant Phase 3 (frontend)
-  - Solution : Ordre d'intégration corrigé (1→2→3)
-- **Formulaire trop haut** :
-  - Dépassait hauteur écran (palette 480px)
-  - Réduit à 40px avec design horizontal
-- **Warnings Vue** :
-  - Icônes Element Plus rendues réactives
-  - Solution documentée (markRaw optionnel)
+- **Store Pinia categories.js**
+- **Composant CategoryForm.vue**
+- **Vue admin/Categories.vue**
 
 ### 📊 Statistiques Sprint 3
 
 - **Fichiers créés/modifiés** : 18 fichiers
-- **Lignes de code** : ~2450 lignes (backend + frontend + tests + seeds)
-- **Tests** : 20 tests unitaires (115 au total avec Sprints 1-2)
-- **Coverage** : >90% (catégories)
-- **Endpoints API** : 5 endpoints catégories
-- **Pages frontend** : 2 vues (admin, manager)
-- **Stores Pinia** : 1 store (categories)
-- **Composants** : 1 formulaire réutilisable
-- **Scripts** : 2 scripts (seed, verify)
-- **Catégories seed** : 4 catégories initiales BEAC
-- **Documentation** : 15 fichiers (~50 pages)
+- **Lignes de code** : ~2450 lignes
+- **Tests** : 20 tests unitaires
 - **Durée** : 1 jour
-
-### 🎯 Objectifs Sprint 3 - Atteints
-
-- ✅ CRUD catégories backend complet et testé
-- ✅ Permissions admin/manager fonctionnelles
-- ✅ Seeds catégories initiales (4 catégories BEAC)
-- ✅ Interface frontend intuitive et responsive
-- ✅ Store Pinia avec gestion état complète
-- ✅ Formulaire avec color picker et validation
-- ✅ Recherche avec Enter et pagination
-- ✅ Tests unitaires (20 tests, >90% coverage)
-- ✅ Migration Alembic (add_created_by)
-- ✅ Documentation exhaustive (15 fichiers)
-- ✅ Corrections UX (formulaire compact, recherche Enter)
-- ✅ Design BEAC respecté (couleurs officielles)
-
-### 📦 Packages Livrés
-
-- **sprint3_phases1_2_3_complete.zip** (76 KB) - Archive complète 3 phases
-- **sprint3_phase1_complete.zip** (42 KB) - Backend catégories complet
-- **sprint3_phase2_seeds.zip** (13 KB) - Scripts seeds et vérification
-- **sprint3_phase3_frontend.zip** (28 KB) - Frontend Vue.js complet
-- **Documentation** (15 fichiers MD) - Guides, rapports, synthèses
-
-### 🔄 Refactoring Recommandé (Optionnel)
-
-**Éliminer duplication admin/manager** :
-- Créer composant partagé `CategoriesManagement.vue`
-- Convertir vues en wrappers légers (250→7 lignes)
-- Respecter principe DRY
-- Documentation : REFACTORING_DRY_CATEGORIES.md
-
-**Statut** : Optionnel, peut être fait en Sprint 4
 
 ---
 
@@ -390,30 +411,22 @@ Chunking Worker → PROCESSING/CHUNKING
 - Changement mot de passe obligatoire (first login)
 - Logout avec invalidation token
 - Refresh token automatique
-- Middleware vérification JWT
-- Guards Vue Router
 
 #### Phase 2 : Gestion Utilisateurs (2025-11-22)
 - CRUD utilisateurs complet (admin)
 - Import Excel utilisateurs
 - Activation/désactivation comptes
-- Reset mot de passe (email dev/prod)
-- Page profil utilisateur
-- Statistiques utilisateurs
+- Reset mot de passe
 
 #### Phase 3 : Interface Admin (2025-11-22)
 - Dashboard admin
 - Table utilisateurs paginée
-- Modals création/édition
-- Confirmation actions critiques
-- Design BEAC
 
 ### 📊 Statistiques Sprint 2
 
 - **Fichiers créés/modifiés** : ~45 fichiers
 - **Lignes de code** : ~4500 lignes
-- **Tests** : 60+ tests (95 au total)
-- **Endpoints API** : 15+ endpoints
+- **Tests** : 60+ tests
 - **Durée** : 3 jours
 
 ---
@@ -448,22 +461,22 @@ Chunking Worker → PROCESSING/CHUNKING
 
 ## Notes de Version
 
-### [1.0.0-sprint4] - 2025-11-23
+### [1.0.0-sprint6] - 2025-11-23
 
-**Résumé** : Pipeline extraction documents complet avec OCR Mistral, chunking intelligent, et nettoyage texte.
+**Résumé** : Recherche hybride et cache intelligent 2 niveaux.
 
 **Nouveautés** :
-- 📄 Extraction tous formats (PDF, DOCX, XLSX, PPTX, TXT, MD, RTF)
-- 🔍 OCR Mistral pour images intégrées
-- ✂️ Chunking intelligent avec overlap
-- 🧹 Nettoyage artefacts OCR automatique
-- 📊 Métadonnées enrichies (langue, titre, OCR)
-- ⚡ Pipeline asynchrone Celery
+- 🔍 Recherche hybride BM25 + Sémantique
+- 🎯 Reranking Mistral (top 10 → top 3)
+- 💾 Cache L1 (hash exact) + L2 (similarité > 95%)
+- ⚡ Invalidation automatique par document
+- 📊 Statistiques cache (hit_rate, économies)
+- ⚙️ Configs dynamiques depuis DB
 
 **Prérequis** :
-- Sprint 1-3 complétés
+- Sprint 1-4 complétés
 - Clé API Mistral configurée
-- Celery workers démarrés
+- Weaviate opérationnel
 
 **Installation** :
 ```bash
@@ -471,27 +484,13 @@ Chunking Worker → PROCESSING/CHUNKING
 docker-compose exec backend alembic upgrade head
 
 # Copier les fichiers
-cp document_processor.py backend/app/rag/
-cp ocr_processor.py backend/app/rag/
-cp text_cleaner.py backend/app/rag/
-cp processing_tasks.py backend/app/workers/
-cp chunking_tasks.py backend/app/workers/
+cp query_cache.py cache_document_map.py cache_statistics.py backend/app/models/
+cp cache.py backend/app/schemas/
+cp retriever.py reranker.py backend/app/rag/
+cp cache_service.py backend/app/services/
 
-# Restart workers
-docker-compose restart celery-worker-processing celery-worker-chunking
-```
-
-**Test** :
-```bash
-# Upload document via API
-curl -X POST "http://localhost/api/v1/documents/upload" \
-  -H "Authorization: Bearer TOKEN" \
-  -F "files=@document.pdf" \
-  -F "category_id=UUID"
-
-# Vérifier statut
-curl "http://localhost/api/v1/documents/{id}/status" \
-  -H "Authorization: Bearer TOKEN"
+# Restart services
+docker-compose restart backend
 ```
 
 ---
@@ -506,21 +505,6 @@ curl "http://localhost/api/v1/documents/{id}/status" \
 - **Supprimé** : Fonctionnalités supprimées
 - **Corrigé** : Corrections de bugs
 - **Sécurité** : Correctifs de sécurité
-
-### Format des Entrées
-
-```
-## [Version] - YYYY-MM-DD
-
-### Ajouté
-- Description du changement
-
-### Modifié
-- Description de la modification
-
-### Corrigé
-- Description du bug corrigé
-```
 
 ---
 

@@ -14,8 +14,7 @@
 
         <!-- Texte -->
         <h1 class="title-irobot">IroBot</h1>
-        <p class="subtitle-env">(Environnement de production)</p>
-        <h2 class="subtitle-cap">Assistant RAG Intelligent - BEAC</h2>
+        <h2 class="subtitle-cap">L’IA au service de l’expertise interne.</h2>
       </div>
     </div>
 
@@ -29,7 +28,7 @@
               <ChatDotRound />
             </el-icon>
           </div>
-          <h3>Contrôle Audit Performance</h3>
+          <h3>Connexion à IroBot – Espace Utilisateur</h3>
         </div>
 
         <!-- Formulaire de connexion -->
@@ -43,7 +42,7 @@
           <el-form-item prop="matricule">
             <el-input
               v-model="loginForm.matricule"
-              placeholder="Matricule"
+              placeholder="Votre Matricule"
               size="large"
               class="irobot-input"
             />
