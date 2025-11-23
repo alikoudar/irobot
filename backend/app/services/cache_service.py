@@ -155,6 +155,56 @@ class CacheService:
             f"Seuil similarité: {config['similarity_threshold']} (depuis DB)"
         )
     
+    def _validate_document_ids(
+        self,
+        document_ids: List[str],
+        db: Session
+    ) -> List[str]:
+        """
+        Valide les document_ids en vérifiant qu'ils existent dans la table documents.
+        
+        Args:
+            document_ids: Liste des IDs de documents à valider
+            db: Session de base de données
+        
+        Returns:
+            Liste des IDs de documents valides (qui existent dans la DB)
+        """
+        if not document_ids:
+            return []
+        
+        from uuid import UUID
+        from app.models.document import Document
+        
+        valid_ids = []
+        
+        for doc_id in document_ids:
+            # Ignorer les IDs vides
+            if not doc_id:
+                continue
+            
+            try:
+                # Tenter de convertir en UUID
+                uuid_obj = UUID(str(doc_id))
+                
+                # Vérifier si le document existe
+                exists = db.query(Document.id).filter(
+                    Document.id == uuid_obj
+                ).first()
+                
+                if exists:
+                    valid_ids.append(str(uuid_obj))
+                else:
+                    logger.debug(f"Document ID non trouvé dans DB, ignoré: {doc_id}")
+                    
+            except (ValueError, AttributeError) as e:
+                logger.debug(f"Document ID invalide (pas un UUID), ignoré: {doc_id}")
+                continue
+        
+        logger.debug(f"Document IDs validés: {len(valid_ids)}/{len(document_ids)}")
+        
+        return valid_ids
+    
     # =========================================================================
     # CACHE LEVEL 1 - CORRESPONDANCE EXACTE
     # =========================================================================
@@ -387,6 +437,9 @@ class CacheService:
         
         logger.info(f"Sauvegarde cache - Hash: {query_hash[:16]}..., TTL: {ttl_days} jours")
         
+        # Valider les document_ids avant insertion pour éviter FK violation
+        valid_document_ids = self._validate_document_ids(document_ids, db)
+        
         # Vérifier si un cache existe déjà pour ce hash
         existing = db.query(QueryCache).filter(
             QueryCache.query_hash == query_hash
@@ -408,7 +461,7 @@ class CacheService:
                 CacheDocumentMap.cache_id == existing.id
             ).delete()
             
-            for doc_id in document_ids:
+            for doc_id in valid_document_ids:
                 mapping = CacheDocumentMap(
                     cache_id=existing.id,
                     document_id=doc_id
@@ -435,8 +488,8 @@ class CacheService:
         db.add(cache_entry)
         db.flush()  # Pour obtenir l'ID
         
-        # Créer les mappings document
-        for doc_id in document_ids:
+        # Créer les mappings document avec les IDs validés
+        for doc_id in valid_document_ids:
             mapping = CacheDocumentMap(
                 cache_id=cache_entry.id,
                 document_id=doc_id
@@ -446,7 +499,7 @@ class CacheService:
         db.commit()
         db.refresh(cache_entry)
         
-        logger.info(f"Cache créé - id={cache_entry.id}, documents={len(document_ids)}")
+        logger.info(f"Cache créé - id={cache_entry.id}, documents={len(valid_document_ids)}")
         
         return cache_entry
     

@@ -7,11 +7,297 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### À venir - Sprint 7
-- Generator LLM avec Mistral
-- Streaming SSE
-- Prompts système BEAC
-- Pipeline RAG complet
+### À venir - Sprint 8
+- Interface Chat Vue.js
+- Composants conversation
+- Affichage sources et citations
+- Tests E2E Playwright
+
+---
+
+## [1.0.0-sprint7] - 2025-11-24
+
+### ✨ Ajouté
+
+#### Phase 1 : Schémas Chat (2025-11-23)
+- **ChatRequest** :
+  - Validation message (1-10000 caractères)
+  - conversation_id optionnel (reprise conversation)
+  - stream (défaut: true pour SSE)
+  - category_filter optionnel
+- **ChatResponse** :
+  - conversation_id, message_id
+  - content (réponse générée)
+  - sources (liste documents avec scores)
+  - token_count_input/output, cost_usd/xaf
+  - cache_hit, response_time_seconds, model_used
+- **StreamChunk** :
+  - Types: token, metadata, sources, error, done
+  - Format SSE compatible
+- **SourceReference** :
+  - document_id, title, category
+  - page, chunk_index, relevance_score, excerpt
+- **ConversationSummary**, **ConversationDetail** :
+  - Gestion conversations avec messages
+
+#### Phase 2 : Prompts Système (2025-11-23)
+- **PromptBuilder** :
+  - build_system_prompt() - Prompt BEAC strict
+  - build_context_section() - Formatage chunks (SANS scores)
+  - build_history_section() - Historique conversation
+  - build_full_prompt() - Assemblage complet
+  - detect_response_format() - Auto-détection format
+- **ResponseFormat** (Enum) :
+  - DEFAULT, TABLE, LIST, NUMBERED
+  - CODE, COMPARISON, CHRONOLOGICAL, STEP_BY_STEP
+- **Prompt système strict** :
+  - Interdit hallucinations et recommandations
+  - Interdit "à titre indicatif", "processus générique"
+  - Utilisation UNIQUEMENT du contexte fourni
+  - Citations obligatoires [Document X]
+- **ChunkForPrompt**, **HistoryMessage** :
+  - Dataclasses pour formatage prompt
+
+#### Phase 3 : Generator LLM (2025-11-23)
+- **MistralGenerator** :
+  - generate() - Génération synchrone
+  - generate_streaming() - AsyncGenerator SSE
+  - generate_title() - Titre conversation (max 50 chars)
+- **StreamedChunk** (dataclass) :
+  - type: "token" | "metadata" | "error"
+  - content: texte du token
+  - metadata: GenerationMetadata optionnel
+- **GenerationMetadata** :
+  - tokens_input/output, cost_usd/xaf
+  - model_used, response_time
+- **Calcul coûts** :
+  - Tarifs depuis DB (ConfigService)
+  - Taux de change depuis exchange_rates
+  - Support USD et XAF
+
+#### Phase 4 : Endpoints Chat (2025-11-23)
+- **POST /v1/chat** :
+  - Création/reprise conversation
+  - Mode synchrone et streaming SSE
+  - Cache L1/L2 intégré
+  - Token tracking automatique
+- **GET /v1/chat/conversations** :
+  - Liste conversations utilisateur
+  - Pagination et tri
+- **GET /v1/chat/conversations/{id}** :
+  - Détails conversation avec messages
+- **DELETE /v1/chat/conversations/{id}** :
+  - Suppression conversation
+- **POST /v1/chat/conversations/{id}/title** :
+  - Génération titre automatique
+
+#### Phase 5 : Tests Unitaires (2025-11-23)
+- **test_schemas_sprint7.py** (~450 lignes, 35 tests) :
+  - Validation ChatRequest, ChatResponse
+  - StreamChunk, SourceReference
+  - ConversationSummary, ConversationDetail
+- **test_prompts.py** (~500 lignes, 40 tests) :
+  - PromptBuilder complet
+  - Détection format automatique
+  - Formatage contexte et historique
+- **test_chat_service.py** (~550 lignes, 35 tests) :
+  - Pipeline RAG complet
+  - Cache hit/miss
+  - Token tracking
+- **test_chat_endpoints.py** (~450 lignes, 25 tests) :
+  - Endpoints HTTP
+  - Authentification
+  - Streaming SSE
+
+### 🛠️ Corrigé
+
+- **Erreur `content` vs `text`** :
+  - Weaviate stocke le texte dans `content`, pas `text`
+  - Retriever corrigé pour mapper `content` → `text`
+  - Chunks maintenant transmis au LLM avec contenu
+- **Erreur `_additional.score`** :
+  - weaviate_client retournait score au mauvais niveau
+  - Corrigé pour format `_additional.score` attendu par retriever
+- **Erreur `OperationType.GENERATION`** :
+  - Enum inexistant → remplacé par `RESPONSE_GENERATION`
+- **Erreur `exchange_rate` NULL** :
+  - Colonne NOT NULL non renseignée
+  - Ajout récupération taux depuis DB
+- **Erreur `ForeignKeyViolation cache_document_map`** :
+  - document_ids Weaviate ≠ document_ids PostgreSQL
+  - Ajout validation `_validate_document_ids()`
+- **Erreur `ChunkForPrompt` arguments** :
+  - Utilisait `content` au lieu de `text`
+  - Corrigé mapping attributs
+- **Erreur `build_system_prompt()` argument** :
+  - Méthode sans paramètre, appelée avec `response_format`
+  - Corrigé appel
+- **Erreur `async for` requires `__aiter__`** :
+  - Mistral SDK synchrone dans contexte async
+  - Implémentation AsyncGenerator avec `run_in_executor`
+- **Erreur scores 0%** :
+  - Score non transmis correctement depuis Weaviate
+  - Format `_additional.score` corrigé
+- **Hallucinations et recommandations** :
+  - Prompt système trop permissif
+  - Nouveau prompt strict avec interdictions explicites
+  - Température réduite de 0.7 à 0.2
+- **Scores affichés aux utilisateurs** :
+  - Template prompt affichait `Pertinence: X%`
+  - Retiré du template (info interne uniquement)
+
+### 🔧 Modifié
+
+- **retriever.py** :
+  - Propriétés Weaviate : `content` au lieu de `text`
+  - Mapping `content` → `text` dans `_process_results()`
+- **weaviate_client.py** :
+  - Nouvelle méthode async `hybrid_search()`
+  - Format retour avec `_additional.score`
+- **prompts.py** :
+  - Prompt système strict (interdictions explicites)
+  - Template sans scores de pertinence
+  - Instructions de fin renforcées
+- **generator.py** :
+  - AsyncGenerator compatible `async for`
+  - Import depuis `mistral_client`
+  - Interface StreamedChunk correcte
+- **cache_service.py** :
+  - Validation document_ids avant insertion
+  - Protection ForeignKeyViolation
+- **cache_statistics.py** :
+  - Protection division par zéro
+  - Protection None + int
+- **chat_service.py** :
+  - OperationType.RESPONSE_GENERATION
+  - exchange_rate depuis DB
+
+### 📊 Statistiques Sprint 7
+
+- **Fichiers créés** : 8 fichiers
+  - chat.py (schémas ~300 lignes)
+  - prompts.py (~500 lignes)
+  - generator.py (~580 lignes)
+  - chat_service.py (~1130 lignes)
+  - chat_endpoints.py (~250 lignes)
+  - Tests (4 fichiers ~1950 lignes)
+- **Fichiers corrigés** : 6 fichiers
+  - retriever.py
+  - weaviate_client.py
+  - cache_service.py
+  - cache_statistics.py
+  - prompts.py (prompt strict)
+  - chat_service.py
+- **Lignes de code** : ~4700 lignes
+- **Tests** : 135 tests (35 + 40 + 35 + 25)
+- **Corrections** : 12 bugs majeurs
+- **Durée** : 2 jours
+
+### 🎯 Objectifs Sprint 7 - Atteints
+
+- ✅ Generator LLM avec Mistral
+- ✅ Streaming SSE fonctionnel
+- ✅ Prompts système BEAC stricts
+- ✅ Pipeline RAG complet bout-en-bout
+- ✅ Cache L1/L2 intégré
+- ✅ Token tracking et coûts USD/XAF
+- ✅ Génération titres automatique
+- ✅ Endpoints Chat REST
+- ✅ Tests > 80% (135 tests)
+- ✅ Corrections bugs intégration
+
+### 📦 Fichiers Livrés
+
+```
+backend/app/schemas/
+├── chat.py                  # Schémas Chat (ChatRequest, ChatResponse, etc.)
+
+backend/app/rag/
+├── prompts.py               # PromptBuilder + Prompt système strict
+├── generator.py             # MistralGenerator + Streaming
+├── retriever.py             # HybridRetriever (CORRIGÉ: content)
+
+backend/app/services/
+├── chat_service.py          # ChatService complet
+├── cache_service.py         # CacheService (CORRIGÉ: validation FK)
+
+backend/app/clients/
+├── weaviate_client.py       # WeaviateClient (CORRIGÉ: _additional.score)
+
+backend/app/api/v1/
+├── chat.py                  # Endpoints Chat
+
+backend/app/models/
+├── cache_statistics.py      # (CORRIGÉ: protection None)
+
+tests/
+├── test_schemas_sprint7.py      # Tests schémas (35)
+├── test_prompts.py              # Tests prompts (40)
+├── test_chat_service.py         # Tests service (35)
+├── test_chat_endpoints.py       # Tests endpoints (25)
+```
+
+### 🔄 Pipeline RAG Complet
+
+```
+Question utilisateur
+       ↓
+┌─────────────────────────┐
+│  CACHE L1 (Hash exact)  │
+│  SHA-256 normalisé      │
+└───────────┬─────────────┘
+            │
+       HIT? ├─────────────────────────┐
+            │ NO                      │ YES
+            ↓                         ↓
+┌─────────────────────────┐    ┌──────────────────┐
+│  CACHE L2 (Similarité)  │    │  RETURN CACHED   │
+│  Cosine > 0.95          │    │  + increment_hit │
+└───────────┬─────────────┘    │  + reset_ttl     │
+            │                   └──────────────────┘
+       HIT? ├─────────────────────────┐
+            │ NO                      │ YES
+            ↓                         ↓
+┌─────────────────────────┐    ┌──────────────────┐
+│  PIPELINE RAG COMPLET   │    │  RETURN CACHED   │
+│  1. Embedding question  │    │  (similarity)    │
+│  2. Hybrid search (10)  │    └──────────────────┘
+│  3. Reranking (3)       │
+│  4. PromptBuilder       │  ← NOUVEAU Sprint 7
+│  5. MistralGenerator    │  ← NOUVEAU Sprint 7
+│  6. Streaming SSE       │  ← NOUVEAU Sprint 7
+│  7. save_to_cache()     │
+│  8. track_token_usage() │  ← NOUVEAU Sprint 7
+└─────────────────────────┘
+```
+
+### ⚠️ Limitations Actuelles
+
+- Frontend chat non développé (Sprint 8)
+- WebSocket non implémenté (SSE utilisé)
+- Historique conversation limité à 5 messages
+- Pas de feedback utilisateur (Sprint 9)
+
+### 🚀 Prochaines Étapes (Sprint 8)
+
+1. **Interface Chat Vue.js** :
+   - Composant ChatWindow.vue
+   - Composant MessageBubble.vue
+   - Composant SourceCard.vue
+
+2. **Streaming Frontend** :
+   - EventSource SSE
+   - Affichage progressif tokens
+   - Indicateur "typing..."
+
+3. **Gestion Conversations** :
+   - Liste conversations sidebar
+   - Nouvelle conversation
+   - Suppression conversation
+
+4. **Tests E2E** :
+   - Playwright tests
+   - Scénarios complets
 
 ---
 
@@ -166,61 +452,6 @@ tests/
 ├── test_retriever_reranker_simple.py # Tests RAG (27)
 ├── test_cache_service_simple.py     # Tests service (41)
 ```
-
-### 🔄 Pipeline RAG Actuel
-
-```
-Question utilisateur
-       ↓
-┌─────────────────────────┐
-│  CACHE L1 (Hash exact)  │
-│  SHA-256 normalisé      │
-└───────────┬─────────────┘
-            │
-       HIT? ├─────────────────────────┐
-            │ NO                      │ YES
-            ↓                         ↓
-┌─────────────────────────┐    ┌──────────────────┐
-│  CACHE L2 (Similarité)  │    │  RETURN CACHED   │
-│  Cosine > 0.95          │    │  + increment_hit │
-└───────────┬─────────────┘    │  + reset_ttl     │
-            │                   └──────────────────┘
-       HIT? ├─────────────────────────┐
-            │ NO                      │ YES
-            ↓                         ↓
-┌─────────────────────────┐    ┌──────────────────┐
-│  PIPELINE RAG COMPLET   │    │  RETURN CACHED   │
-│  1. Embedding question  │    │  (similarity)    │
-│  2. Hybrid search (10)  │    └──────────────────┘
-│  3. Reranking (3)       │
-│  4. Generation (Sprint7)│
-│  5. save_to_cache()     │
-└─────────────────────────┘
-```
-
-### ⚠️ Limitations Actuelles
-
-- Generator LLM non implémenté (Sprint 7)
-- Streaming SSE non implémenté (Sprint 7)
-- Frontend chat non développé (Sprint 8)
-- Weaviate client mock dans les tests
-
-### 🚀 Prochaines Étapes (Sprint 7)
-
-1. **Generator LLM** :
-   - MistralGenerator avec streaming
-   - Prompts système BEAC
-   - Context augmentation
-
-2. **API Chat** :
-   - POST /chat/message - Envoi message
-   - GET /chat/stream - SSE streaming
-   - Gestion conversations
-
-3. **Token & Cost Tracking** :
-   - Comptage précis tokens
-   - Calcul coûts USD/XAF
-   - Historique token_usage
 
 ---
 
@@ -460,6 +691,46 @@ backend/alembic/versions/
 ---
 
 ## Notes de Version
+
+### [1.0.0-sprint7] - 2025-11-24
+
+**Résumé** : Pipeline RAG complet avec génération LLM et streaming SSE.
+
+**Nouveautés** :
+- 🤖 Generator Mistral avec streaming SSE
+- 📝 Prompts système BEAC stricts (anti-hallucination)
+- 💬 Endpoints Chat REST complets
+- 📊 Token tracking et calcul coûts
+- 🔧 12 corrections bugs intégration
+- ✅ 135 tests unitaires
+
+**Prérequis** :
+- Sprint 1-6 complétés
+- Clé API Mistral configurée
+- Weaviate avec chunks indexés
+
+**Installation** :
+```bash
+# Copier les fichiers corrigés
+cp retriever_fixed.py backend/app/rag/retriever.py
+cp prompts_fixed.py backend/app/rag/prompts.py
+cp generator_fixed.py backend/app/rag/generator.py
+cp weaviate_client_fixed.py backend/app/clients/weaviate_client.py
+cp cache_service_fixed.py backend/app/services/cache_service.py
+
+# Réduire température (recommandé)
+docker exec -it irobot-db-1 psql -U irobot -d irobot_db -c "
+UPDATE system_configs 
+SET value = '{\"model_name\": \"mistral-medium-latest\", \"max_tokens\": 2048, \"temperature\": 0.2}'
+WHERE key = 'models.generation';
+"
+
+# Vider le cache
+docker exec -it irobot-db-1 psql -U irobot -d irobot_db -c "DELETE FROM query_cache;"
+
+# Restart
+docker-compose restart backend
+```
 
 ### [1.0.0-sprint6] - 2025-11-23
 

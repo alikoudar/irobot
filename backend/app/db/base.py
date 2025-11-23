@@ -11,3 +11,7 @@ from app.models.token_usage import TokenUsage  # noqa
 from app.models.audit_log import AuditLog  # noqa
 from app.models.system_config import SystemConfig  # noqa
 from app.models.exchange_rate import ExchangeRate
+from app.models.query_cache import QueryCache  # noqa
+from app.models.cache_document_map import CacheDocumentMap  # noqa
+from app.models.cache_statistics import CacheStatistics  # noqa
+

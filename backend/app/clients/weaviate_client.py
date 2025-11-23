@@ -1,8 +1,16 @@
+# -*- coding: utf-8 -*-
 """
 Client Weaviate pour l'indexation et la recherche vectorielle.
 
-Ce client gère toutes les interactions avec la base Weaviate.
+Ce client gère toutes les interactions avec la base Weaviate :
+- Création/gestion de la collection
+- Insertion batch de vecteurs
+- Recherche hybride (BM25 + semantic)
+- Suppression de documents
+
+Sprint 5 - Corrigé Sprint 7 : Ajout méthode hybrid_search async
 """
+
 import logging
 import time
 from typing import List, Optional, Dict, Any
@@ -11,7 +19,7 @@ from uuid import UUID
 
 import weaviate
 from weaviate.classes.config import Configure, Property, DataType, VectorDistances
-from weaviate.classes.query import MetadataQuery
+from weaviate.classes.query import MetadataQuery, Filter
 from weaviate.classes.data import DataObject
 from weaviate.util import generate_uuid5
 
@@ -97,207 +105,138 @@ class WeaviateClient:
             self._client.close()
             self._client = None
     
-    # =========================================================================
-    # COLLECTION MANAGEMENT
-    # =========================================================================
+    def is_healthy(self) -> bool:
+        """Vérifie si Weaviate est accessible."""
+        try:
+            return self.client.is_ready()
+        except Exception as e:
+            logger.error(f"Weaviate non accessible: {e}")
+            return False
     
-    def create_collection(self, force_recreate: bool = False) -> bool:
+    def collection_exists(self, name: str = None) -> bool:
+        """Vérifie si une collection existe."""
+        coll_name = name or COLLECTION_NAME
+        try:
+            return self.client.collections.exists(coll_name)
+        except Exception as e:
+            logger.error(f"Erreur vérification collection: {e}")
+            return False
+    
+    def create_collection(self, name: str = None) -> bool:
         """
-        Crée la collection DocumentChunk si elle n'existe pas.
+        Crée la collection pour les chunks de documents.
         
         Args:
-            force_recreate: Si True, supprime et recrée la collection
+            name: Nom de la collection (optionnel)
             
         Returns:
-            True si créée, False si existait déjà
+            True si création réussie ou collection existe déjà
         """
+        coll_name = name or COLLECTION_NAME
+        
         try:
-            # Vérifier si la collection existe
-            if self.client.collections.exists(COLLECTION_NAME):
-                if force_recreate:
-                    logger.warning(f"Suppression de la collection {COLLECTION_NAME}")
-                    self.client.collections.delete(COLLECTION_NAME)
-                else:
-                    logger.info(f"Collection {COLLECTION_NAME} existe déjà")
-                    return False
+            if self.collection_exists(coll_name):
+                logger.info(f"Collection {coll_name} existe déjà")
+                return True
             
-            # Créer la collection
             self.client.collections.create(
-                name=COLLECTION_NAME,
-                description="Chunks de documents pour le RAG BEAC",
-                
-                # Configuration vectorielle
-                vectorizer_config=Configure.Vectorizer.none(),  # Vecteurs fournis
+                name=coll_name,
+                vectorizer_config=Configure.Vectorizer.none(),
                 vector_index_config=Configure.VectorIndex.hnsw(
-                    distance_metric=VectorDistances.COSINE,
-                    ef_construction=128,
-                    max_connections=64,
+                    distance_metric=VectorDistances.COSINE
                 ),
-                
-                # Propriétés pour BM25
                 properties=[
-                    Property(
-                        name="content",
-                        data_type=DataType.TEXT,
-                        description="Contenu textuel du chunk",
-                        tokenization=weaviate.classes.config.Tokenization.WORD,  # Pour BM25
-                    ),
-                    Property(
-                        name="document_id",
-                        data_type=DataType.TEXT,
-                        description="UUID du document source",
-                    ),
-                    Property(
-                        name="chunk_id",
-                        data_type=DataType.TEXT,
-                        description="UUID du chunk en base",
-                    ),
-                    Property(
-                        name="chunk_index",
-                        data_type=DataType.INT,
-                        description="Index du chunk dans le document",
-                    ),
-                    Property(
-                        name="document_title",
-                        data_type=DataType.TEXT,
-                        description="Titre du document",
-                        tokenization=weaviate.classes.config.Tokenization.WORD,
-                    ),
-                    Property(
-                        name="category_name",
-                        data_type=DataType.TEXT,
-                        description="Nom de la catégorie",
-                    ),
-                    Property(
-                        name="page_number",
-                        data_type=DataType.INT,
-                        description="Numéro de page",
-                    ),
-                    Property(
-                        name="filename",
-                        data_type=DataType.TEXT,
-                        description="Nom du fichier original",
-                    ),
-                    Property(
-                        name="file_type",
-                        data_type=DataType.TEXT,
-                        description="Extension du fichier",
-                    ),
-                ],
-                
-                # Configuration de l'inverted index pour BM25
-                inverted_index_config=Configure.inverted_index(
-                    bm25_b=0.75,
-                    bm25_k1=1.2,
-                ),
+                    Property(name="chunk_id", data_type=DataType.TEXT),
+                    Property(name="document_id", data_type=DataType.TEXT),
+                    Property(name="document_title", data_type=DataType.TEXT),
+                    Property(name="category_name", data_type=DataType.TEXT),
+                    Property(name="content", data_type=DataType.TEXT),
+                    Property(name="text", data_type=DataType.TEXT),
+                    Property(name="page_number", data_type=DataType.INT),
+                    Property(name="chunk_index", data_type=DataType.INT),
+                    Property(name="uploaded_by", data_type=DataType.TEXT),
+                    Property(name="upload_date", data_type=DataType.TEXT),
+                    Property(name="filename", data_type=DataType.TEXT),
+                ]
             )
             
-            logger.info(f"Collection {COLLECTION_NAME} créée avec succès")
+            logger.info(f"Collection {coll_name} créée avec succès")
             return True
             
         except Exception as e:
             logger.error(f"Erreur création collection: {e}")
-            raise
-    
-    def collection_exists(self) -> bool:
-        """Vérifie si la collection existe."""
-        return self.client.collections.exists(COLLECTION_NAME)
-    
-    def get_collection_stats(self) -> Dict[str, Any]:
-        """Retourne les statistiques de la collection."""
-        try:
-            collection = self.client.collections.get(COLLECTION_NAME)
-            aggregate = collection.aggregate.over_all(total_count=True)
-            
-            return {
-                "name": COLLECTION_NAME,
-                "total_objects": aggregate.total_count,
-            }
-        except Exception as e:
-            logger.error(f"Erreur stats collection: {e}")
-            return {"name": COLLECTION_NAME, "total_objects": 0, "error": str(e)}
-    
-    # =========================================================================
-    # INDEXING
-    # =========================================================================
+            return False
     
     def batch_insert(
         self,
-        chunks_data: List[Dict[str, Any]]
+        chunks: List[Dict[str, Any]],
+        vectors: List[List[float]],
+        collection_name: str = None
     ) -> IndexingResult:
         """
-        Insère un batch de chunks avec leurs vecteurs.
+        Insère des chunks en batch dans Weaviate.
         
         Args:
-            chunks_data: Liste de dicts avec:
-                - chunk_id: UUID du chunk
-                - content: Texte du chunk
-                - vector: Liste de floats (embedding)
-                - document_id: UUID du document
-                - chunk_index: Index du chunk
-                - document_title: Titre (optionnel)
-                - category_name: Catégorie (optionnel)
-                - page_number: Page (optionnel)
-                - filename: Nom fichier (optionnel)
-                - file_type: Extension (optionnel)
-                
+            chunks: Liste de chunks avec leurs propriétés
+            vectors: Liste des vecteurs correspondants
+            collection_name: Nom de la collection
+            
         Returns:
-            IndexingResult avec statistiques
+            IndexingResult avec le résumé de l'opération
         """
+        coll_name = collection_name or COLLECTION_NAME
         start_time = time.time()
+        
         success_count = 0
         error_count = 0
         weaviate_ids = []
         errors = []
         
         try:
-            # Assurer que la collection existe
-            if not self.collection_exists():
-                self.create_collection()
+            collection = self.client.collections.get(coll_name)
             
-            collection = self.client.collections.get(COLLECTION_NAME)
-            
-            # Préparer les objets
-            objects_to_insert = []
-            for chunk in chunks_data:
-                # Générer un UUID déterministe basé sur chunk_id
-                weaviate_uuid = generate_uuid5(str(chunk["chunk_id"]))
-                
-                obj = DataObject(
-                    properties={
-                        "content": chunk["content"],
-                        "document_id": str(chunk["document_id"]),
-                        "chunk_id": str(chunk["chunk_id"]),
-                        "chunk_index": chunk.get("chunk_index", 0),
-                        "document_title": chunk.get("document_title", ""),
-                        "category_name": chunk.get("category_name", ""),
-                        "page_number": chunk.get("page_number"),
-                        "filename": chunk.get("filename", ""),
-                        "file_type": chunk.get("file_type", ""),
-                    },
-                    vector=chunk["vector"],
-                    uuid=weaviate_uuid,
-                )
-                objects_to_insert.append(obj)
-                weaviate_ids.append(str(weaviate_uuid))
-            
-            # Insertion batch
             with collection.batch.dynamic() as batch:
-                for obj in objects_to_insert:
-                    batch.add_object(
-                        properties=obj.properties,
-                        vector=obj.vector,
-                        uuid=obj.uuid,
-                    )
-            
-            # Vérifier les erreurs (le batch dynamic gère automatiquement)
-            success_count = len(objects_to_insert)
+                for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+                    try:
+                        # Générer un UUID déterministe
+                        weaviate_id = generate_uuid5(chunk.get("chunk_id", str(i)))
+                        
+                        # Préparer les propriétés
+                        properties = {
+                            "chunk_id": chunk.get("chunk_id", ""),
+                            "document_id": chunk.get("document_id", ""),
+                            "document_title": chunk.get("document_title", ""),
+                            "category_name": chunk.get("category_name", ""),
+                            "content": chunk.get("content", chunk.get("text", "")),
+                            "text": chunk.get("text", chunk.get("content", "")),
+                            "page_number": chunk.get("page_number", 0),
+                            "chunk_index": chunk.get("chunk_index", i),
+                            "uploaded_by": chunk.get("uploaded_by", ""),
+                            "upload_date": chunk.get("upload_date", ""),
+                            "filename": chunk.get("filename", ""),
+                        }
+                        
+                        batch.add_object(
+                            properties=properties,
+                            vector=vector,
+                            uuid=weaviate_id
+                        )
+                        
+                        weaviate_ids.append(str(weaviate_id))
+                        success_count += 1
+                        
+                    except Exception as e:
+                        error_count += 1
+                        errors.append({
+                            "chunk_id": chunk.get("chunk_id"),
+                            "error": str(e)
+                        })
             
             processing_time = time.time() - start_time
             
             logger.info(
-                f"Indexation batch réussie: {success_count} objets, "
-                f"{processing_time:.2f}s"
+                f"Batch insert terminé: {success_count} succès, "
+                f"{error_count} erreurs, {processing_time:.2f}s"
             )
             
             return IndexingResult(
@@ -309,52 +248,165 @@ class WeaviateClient:
             )
             
         except Exception as e:
-            logger.error(f"Erreur indexation batch: {e}")
-            processing_time = time.time() - start_time
+            logger.error(f"Erreur batch insert: {e}")
             return IndexingResult(
-                success_count=success_count,
-                error_count=len(chunks_data) - success_count,
-                weaviate_ids=weaviate_ids,
-                processing_time_seconds=processing_time,
+                success_count=0,
+                error_count=len(chunks),
+                weaviate_ids=[],
+                processing_time_seconds=time.time() - start_time,
                 errors=[{"error": str(e)}]
             )
     
-    # =========================================================================
-    # DELETION
-    # =========================================================================
-    
-    def delete_document_chunks(self, document_id: str) -> int:
+    async def hybrid_search(
+        self,
+        query: str,
+        vector: List[float],
+        alpha: float = 0.75,
+        limit: int = 10,
+        collection_name: str = None,
+        properties: List[str] = None,
+        where_filter: dict = None,
+        return_metadata: bool = True
+    ) -> List[dict]:
         """
-        Supprime tous les chunks d'un document.
+        Effectue une recherche hybride dans Weaviate.
+        
+        Combine recherche BM25 (lexicale) et recherche vectorielle (sémantique).
         
         Args:
-            document_id: UUID du document
-            
+            query: Texte de la requête (pour BM25)
+            vector: Vecteur embedding de la requête
+            alpha: Poids entre BM25 et sémantique (0=BM25 pur, 1=sémantique pur)
+            limit: Nombre de résultats à retourner
+            collection_name: Nom de la collection (optionnel)
+            properties: Liste des propriétés à retourner
+            where_filter: Filtres optionnels
+            return_metadata: Inclure les métadonnées (score, distance)
+        
         Returns:
-            Nombre d'objets supprimés
+            Liste de dictionnaires avec les résultats
         """
         try:
-            collection = self.client.collections.get(COLLECTION_NAME)
+            # Utiliser la collection par défaut si non spécifiée
+            coll_name = collection_name or COLLECTION_NAME
+            collection = self.client.collections.get(coll_name)
             
-            # Supprimer par filtre sur document_id
-            result = collection.data.delete_many(
-                where=weaviate.classes.query.Filter.by_property("document_id").equal(str(document_id))
+            # Construire les métadonnées à retourner
+            metadata_query = None
+            if return_metadata:
+                metadata_query = MetadataQuery(score=True, distance=True)
+            
+            # Construire le filtre Weaviate si fourni
+            weaviate_filter = None
+            if where_filter:
+                weaviate_filter = self._build_filter(where_filter)
+            
+            # Exécuter la recherche hybride
+            response = collection.query.hybrid(
+                query=query,
+                vector=vector,
+                alpha=alpha,
+                limit=limit,
+                return_metadata=metadata_query,
+                filters=weaviate_filter
             )
             
-            deleted_count = result.successful if hasattr(result, 'successful') else 0
-            logger.info(f"Supprimé {deleted_count} chunks pour document {document_id}")
+            # Convertir les résultats en dictionnaires
+            # Format attendu par le retriever (retriever.py ligne 455-480)
+            results = []
+            for obj in response.objects:
+                # Extraire le score
+                score = 0.0
+                if obj.metadata:
+                    if hasattr(obj.metadata, 'score') and obj.metadata.score is not None:
+                        score = float(obj.metadata.score)
+                
+                # Format compatible avec retriever._process_results()
+                result = {}
+                
+                # Copier toutes les propriétés au niveau racine
+                for key, value in obj.properties.items():
+                    result[key] = value
+                
+                # Ajouter _additional pour le score (format attendu par retriever)
+                result["_additional"] = {
+                    "id": str(obj.uuid),
+                    "score": score,
+                    "distance": obj.metadata.distance if obj.metadata and hasattr(obj.metadata, 'distance') else None,
+                }
+                    
+                results.append(result)
             
-            return deleted_count
+            logger.debug(f"Recherche hybride: {len(results)} résultats pour '{query[:50]}...'")
+            
+            return results
             
         except Exception as e:
-            logger.error(f"Erreur suppression chunks: {e}")
-            return 0
+            logger.error(f"Erreur recherche hybride: {e}")
+            return []
     
-    # =========================================================================
-    # SEARCH (placeholder pour Sprint 6)
-    # =========================================================================
+    def _build_filter(self, where_filter: dict):
+        """
+        Convertit un filtre dict en filtre Weaviate.
+        
+        Args:
+            where_filter: Dictionnaire de filtre
+            
+        Returns:
+            Filtre Weaviate ou None
+        """
+        try:
+            if not where_filter:
+                return None
+            
+            # Cas simple : un seul filtre
+            if "path" in where_filter:
+                path = where_filter["path"][0] if isinstance(where_filter["path"], list) else where_filter["path"]
+                operator = where_filter.get("operator", "Equal")
+                
+                if operator == "Equal":
+                    value = where_filter.get("valueText") or where_filter.get("valueString")
+                    return Filter.by_property(path).equal(value)
+                elif operator == "ContainsAny":
+                    values = where_filter.get("valueTextArray") or where_filter.get("valueStringArray")
+                    return Filter.by_property(path).contains_any(values)
+                elif operator == "GreaterThan":
+                    value = where_filter.get("valueNumber") or where_filter.get("valueInt")
+                    return Filter.by_property(path).greater_than(value)
+                elif operator == "LessThan":
+                    value = where_filter.get("valueNumber") or where_filter.get("valueInt")
+                    return Filter.by_property(path).less_than(value)
+            
+            # Cas combiné : And/Or
+            if "operator" in where_filter and where_filter["operator"] in ["And", "Or"]:
+                operands = where_filter.get("operands", [])
+                if not operands:
+                    return None
+                
+                filters = [self._build_filter(op) for op in operands if op]
+                filters = [f for f in filters if f is not None]
+                
+                if not filters:
+                    return None
+                
+                if where_filter["operator"] == "And":
+                    result = filters[0]
+                    for f in filters[1:]:
+                        result = result & f
+                    return result
+                else:  # Or
+                    result = filters[0]
+                    for f in filters[1:]:
+                        result = result | f
+                    return result
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Erreur construction filtre: {e}")
+            return None
     
-    def hybrid_search(
+    def search_simple(
         self,
         query: str,
         query_vector: List[float],
@@ -362,9 +414,7 @@ class WeaviateClient:
         alpha: float = 0.75
     ) -> List[SearchResult]:
         """
-        Recherche hybride (BM25 + semantic).
-        
-        Sera implémentée complètement dans le Sprint 6.
+        Recherche hybride simplifiée (synchrone).
         
         Args:
             query: Texte de la requête
@@ -392,7 +442,7 @@ class WeaviateClient:
                 results.append(SearchResult(
                     chunk_id=obj.properties.get("chunk_id", ""),
                     weaviate_id=str(obj.uuid),
-                    content=obj.properties.get("content", ""),
+                    content=obj.properties.get("content", obj.properties.get("text", "")),
                     score=obj.metadata.score if obj.metadata else 0.0,
                     distance=obj.metadata.distance if obj.metadata else None,
                     metadata={
@@ -410,6 +460,72 @@ class WeaviateClient:
         except Exception as e:
             logger.error(f"Erreur recherche hybride: {e}")
             return []
+    
+    def delete_document_chunks(
+        self,
+        document_id: str,
+        collection_name: str = None
+    ) -> int:
+        """
+        Supprime tous les chunks d'un document.
+        
+        Args:
+            document_id: ID du document
+            collection_name: Nom de la collection
+            
+        Returns:
+            Nombre de chunks supprimés
+        """
+        coll_name = collection_name or COLLECTION_NAME
+        
+        try:
+            collection = self.client.collections.get(coll_name)
+            
+            # Supprimer par filtre
+            result = collection.data.delete_many(
+                where=Filter.by_property("document_id").equal(document_id)
+            )
+            
+            deleted_count = result.successful if hasattr(result, 'successful') else 0
+            
+            logger.info(f"Supprimé {deleted_count} chunks pour document {document_id}")
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Erreur suppression chunks: {e}")
+            return 0
+    
+    def get_document_chunk_count(
+        self,
+        document_id: str,
+        collection_name: str = None
+    ) -> int:
+        """
+        Compte les chunks d'un document.
+        
+        Args:
+            document_id: ID du document
+            collection_name: Nom de la collection
+            
+        Returns:
+            Nombre de chunks
+        """
+        coll_name = collection_name or COLLECTION_NAME
+        
+        try:
+            collection = self.client.collections.get(coll_name)
+            
+            result = collection.aggregate.over_all(
+                filters=Filter.by_property("document_id").equal(document_id),
+                total_count=True
+            )
+            
+            return result.total_count if result else 0
+            
+        except Exception as e:
+            logger.error(f"Erreur comptage chunks: {e}")
+            return 0
 
 
 # =============================================================================

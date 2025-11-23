@@ -57,10 +57,18 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
-      path: '/documents',
-      name: 'documents',
-      component: () => import('../views/admin/Documents.vue'),
-      meta: { requiresAuth: true, requiresManager: true }
+    path: '/documents',
+    name: 'documents',
+    component: () => import('../views/manager/Documents.vue'),
+    meta: { requiresAuth: true, requiresManager: true }
+    },
+
+    // Route Admin - Documents (même vue, permissions différentes)
+    {
+    path: '/admin/documents',
+    name: 'admin-documents',
+    component: () => import('../views/admin/Documents.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
     },
     // ============================================================================
     // ROUTES CATÉGORIES - SPRINT 3 PHASE 3
