@@ -7,19 +7,194 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### À venir - Sprint 4
-- Gestion des documents
-- Upload et traitement documents
-- Pipeline RAG
-- Interface chatbot
+### À venir - Sprint 5
+- Embedding chunks avec Mistral
+- Indexing dans Weaviate (vectors + BM25)
+- Token & cost tracking
+- Periodic tasks (cleanup, stats)
 
 ---
 
-## [1.0.0-sprint3] - 2024-11-22
+## [1.0.0-sprint4] - 2025-11-23
 
 ### ✨ Ajouté
 
-#### Phase 1 : Backend Catégories (2024-11-22)
+#### Phase 1 : Pipeline Extraction Documents (2025-11-23)
+- **DocumentProcessor hybride** :
+  - Extraction texte natif PDF (pypdf)
+  - Extraction DOCX (python-docx)
+  - Extraction PPTX (python-pptx)
+  - Extraction XLSX (openpyxl)
+  - Extraction TXT, MD, RTF
+  - OCR Mistral pour images intégrées
+  - Détection automatique PDF scanné vs natif
+  - Méthode d'extraction : TEXT, OCR, HYBRID, FALLBACK
+- **MistralOCRClient** :
+  - extract_text_from_image() - OCR image unique
+  - extract_text_from_pdf() - OCR PDF complet
+  - batch_process_images() - OCR batch
+  - Support formats : PNG, JPG, JPEG, WEBP, GIF
+  - Retour Markdown structuré (tableaux, titres)
+
+#### Phase 2 : Workers Celery (2025-11-23)
+- **Processing Worker** (celery-worker-processing) :
+  - extract_document_text() - Extraction hybride
+  - Nettoyage caractères NULL (\u0000) pour PostgreSQL
+  - Estimation pages pour DOCX/TXT (2500 chars/page)
+  - Mise à jour colonnes OCR (has_images, image_count, etc.)
+  - Retry automatique (max 3, backoff exponentiel)
+- **Chunking Worker** (celery-worker-chunking) :
+  - chunk_document() - Découpage intelligent
+  - Nettoyage artefacts OCR (--Mo, \-n, etc.)
+  - Préservation structure (tableaux, listes)
+  - Métadonnées enrichies par chunk
+  - Détection langue document
+  - Génération weaviate_id temporaire
+
+#### Phase 3 : Modèle Document enrichi (2025-11-23)
+- **Nouvelles colonnes OCR** :
+  - has_images (BOOLEAN) - Document avec images OCR
+  - image_count (INTEGER) - Nombre d'images traitées
+  - ocr_completed (BOOLEAN) - OCR effectué
+  - extraction_method (VARCHAR) - TEXT, OCR, HYBRID, FALLBACK
+- **Migration Alembic** :
+  - 20241124_add_ocr_columns.py
+  - Index sur extraction_method et has_images
+  - Compatible documents existants
+
+#### Phase 4 : Module Text Cleaner (2025-11-23)
+- **text_cleaner.py** :
+  - sanitize_text_for_postgres() - Supprime \u0000
+  - remove_ocr_artifacts() - Nettoie artefacts OCR
+  - normalize_whitespace() - Normalise espaces
+  - clean_punctuation() - Corrige ponctuation
+  - detect_document_language() - Détection fr/en
+  - extract_document_title() - Extraction titre
+
+### 🔧 Modifié
+
+- **Modèle Document** :
+  - Ajout 4 colonnes OCR (has_images, image_count, ocr_completed, extraction_method)
+  - Enums en MAJUSCULES (DocumentStatus, ProcessingStage, ExtractionMethod)
+  - Méthodes helper : update_extraction_info(), update_chunking_info()
+- **Modèle Chunk** :
+  - weaviate_id généré temporairement (UUID)
+  - Métadonnées enrichies (has_ocr_content, has_table, document_language)
+- **Configuration Celery** :
+  - Queue "processing" pour extraction
+  - Queue "chunking" pour découpage
+  - Retry avec backoff exponentiel
+
+### 🛠️ Corrigé
+
+- **Erreur PostgreSQL \u0000** :
+  - Caractères NULL dans texte extrait
+  - Solution : sanitize_text_for_postgres() avant stockage
+- **Erreur weaviate_id NOT NULL** :
+  - Contrainte NOT NULL sur chunks.weaviate_id
+  - Solution : UUID temporaire généré au chunking
+- **Estimation pages DOCX** :
+  - Retournait toujours 1 page
+  - Solution : Estimation basée sur caractères (2500/page)
+- **Artefacts OCR** :
+  - Fragments "--Mo", "\-n" dans texte
+  - Solution : Module text_cleaner avec regex
+
+### 📊 Statistiques Sprint 4
+
+- **Fichiers créés** : 8 fichiers
+  - document_processor.py (~400 lignes)
+  - ocr_processor.py (~150 lignes)
+  - processing_tasks.py (~350 lignes)
+  - chunking_tasks.py (~300 lignes)
+  - text_cleaner.py (~200 lignes)
+  - Migration Alembic (~80 lignes)
+- **Lignes de code** : ~1500 lignes
+- **Workers Celery** : 2 workers (processing, chunking)
+- **Formats supportés** : 10 formats (PDF, DOCX, XLSX, PPTX, TXT, MD, RTF, PNG, JPG, etc.)
+- **Durée** : 1 jour
+
+### 🎯 Objectifs Sprint 4 - Atteints
+
+- ✅ Extraction texte tous formats (PDF, DOCX, XLSX, PPTX, TXT, MD, RTF)
+- ✅ OCR Mistral pour images intégrées
+- ✅ Détection automatique PDF scanné
+- ✅ Pipeline asynchrone Celery (processing → chunking)
+- ✅ Chunking intelligent avec overlap
+- ✅ Nettoyage artefacts OCR
+- ✅ Métadonnées enrichies (langue, titre, has_ocr)
+- ✅ Estimation pages pour formats sans pagination
+- ✅ Colonnes OCR en base (has_images, extraction_method)
+- ✅ Enums MAJUSCULES (norme projet)
+
+### 📦 Fichiers Livrés
+
+```
+backend/app/rag/
+├── document_processor.py      # Extraction hybride
+├── ocr_processor.py           # Client Mistral OCR
+├── text_cleaner.py            # Nettoyage texte
+
+backend/app/workers/
+├── processing_tasks.py        # Worker extraction
+├── chunking_tasks.py          # Worker chunking
+
+backend/alembic/versions/
+├── 20241124_add_ocr_columns.py  # Migration OCR
+```
+
+### 🔄 Pipeline Document Actuel
+
+```
+Upload → PENDING
+   ↓
+Processing Worker → PROCESSING/EXTRACTION
+   ↓
+   ├── DocumentProcessor.process_document()
+   ├── OCR images si nécessaire
+   ├── Nettoyage caractères NULL
+   └── Mise à jour: extracted_text, has_images, extraction_method
+   ↓
+Chunking Worker → PROCESSING/CHUNKING
+   ↓
+   ├── Nettoyage artefacts OCR
+   ├── Découpage intelligent (1000 chars, 200 overlap)
+   ├── Création chunks avec métadonnées
+   └── Mise à jour: total_chunks, chunking_stats
+   ↓
+[En attente Sprint 5] → EMBEDDING → INDEXING → COMPLETED
+```
+
+### ⚠️ Limitations Actuelles
+
+- Documents restent à l'étape CHUNKING (embedding non implémenté)
+- weaviate_id temporaire (sera remplacé lors de l'indexing)
+- Frontend gestion documents non encore développé
+
+### 🚀 Prochaines Étapes (Sprint 5)
+
+1. **Embedding Worker** :
+   - embed_chunks() avec Mistral embed
+   - Token counting précis
+   - Cost tracking USD/XAF
+
+2. **Indexing Worker** :
+   - index_document() dans Weaviate
+   - Batch insert optimisé
+   - Mise à jour weaviate_id réel
+
+3. **Tâches périodiques** :
+   - update_exchange_rate() - Taux USD/XAF
+   - cleanup_expired_cache() - Nettoyage cache
+   - cleanup_old_logs() - Purge logs 90j
+
+---
+
+## [1.0.0-sprint3] - 2025-11-22
+
+### ✨ Ajouté
+
+#### Phase 1 : Backend Catégories (2025-11-22)
 - **CRUD catégories complet** :
   - GET /categories - Liste paginée avec recherche
   - POST /categories - Création catégorie
@@ -46,7 +221,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Ajout colonne created_by (FK vers users)
   - Compatible PostgreSQL et SQLite
 
-#### Phase 2 : Seeds Catégories (2024-11-22)
+#### Phase 2 : Seeds Catégories (2025-11-22)
 - **Script de seed** (seed_categories.py) :
   - 4 catégories initiales selon plan BEAC
   - Lettres Circulaires (#005CA9 - Bleu BEAC)
@@ -62,7 +237,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Statistiques globales (total, avec/sans documents)
   - Détection anomalies
 
-#### Phase 3 : Frontend Catégories (2024-11-22)
+#### Phase 3 : Frontend Catégories (2025-11-22)
 - **Store Pinia categories.js** :
   - 10 actions CRUD et utilitaires
   - 4 getters computed (hasCategories, sortedCategories, categoryOptions)
@@ -95,7 +270,7 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   - Folder, FolderOpened, Document, Plus, Search, Edit, Delete, etc.
   - Intégrées partout pour UX cohérente
 
-#### Phase 4 : Tests (2024-11-22)
+#### Phase 4 : Tests (2025-11-22)
 - **20 tests unitaires** (test_categories.py) :
   - TestGetCategories (5 tests)
   - TestCreateCategory (5 tests)
@@ -206,416 +381,118 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ---
 
-## Notes de Version
-
-### [1.0.0-sprint3] - 2024-11-22
-
-**Résumé** : Gestion complète des catégories de documents avec CRUD backend, interface admin moderne, seeds initiales, et tests complets.
-
-**Nouveautés** :
-- 📁 CRUD catégories backend (5 endpoints API)
-- 🎨 Interface admin/manager responsive
-- 🌱 4 catégories initiales BEAC
-- 🔍 Recherche full-text avec Enter
-- 🎨 Color picker avec preview
-- 📊 Statistiques temps réel
-- 🧪 20 tests unitaires
-
-**Prérequis** :
-- Sprint 1 complété (infrastructure)
-- Sprint 2 complété (authentification)
-- PostgreSQL 16+
-- Redis 7.2+
-
-**Installation** :
-```bash
-# Backend
-cd backend
-alembic upgrade head
-python scripts/seed_categories.py
-
-# Frontend
-cd frontend
-npm install
-npm run dev
-
-# Vérifier
-curl http://localhost/api/v1/categories
-```
-
-**Connexion** :
-- URL: http://localhost/categories
-- Admin: ADMIN001 / Admin123!
-- Manager: (créer via interface admin)
-
-**API Documentation** :
-- Swagger UI: http://localhost/api/docs#/categories
-- Endpoints: GET, POST, PUT, DELETE /categories
-
-**Tests** :
-```bash
-cd backend
-pytest tests/test_categories.py -v
-# 20 passed
-```
-
----
-
 ## [1.0.0-sprint2] - 2025-11-22
 
 ### ✨ Ajouté
 
-#### Phase 1-2 : Backend Authentification (2025-11-22)
-- **Système d'authentification JWT complet** :
-  - Login avec matricule/password
-  - Refresh token pour renouvellement
-  - Logout (client-side token deletion)
-  - Change password (utilisateur connecté)
-  - Forgot password (envoi email dev/prod)
-  - Profile update (nom, prénom, email)
-- **Services d'authentification** :
-  - `AuthService` : authenticate_user, create_tokens, refresh_access_token
-  - `AuthService` : update_profile, initiate_password_reset, send_password_reset_email
-  - Logs audit pour toutes les actions (LOGIN_SUCCESS, LOGIN_FAILED, PROFILE_UPDATE, PASSWORD_RESET_REQUEST)
-- **Sécurité renforcée** :
-  - Validation force du mot de passe (min 10 chars, majuscule, chiffre, caractère spécial)
-  - Hash bcrypt pour tous les mots de passe
-  - Tokens JWT avec expiration (access 30min, refresh 7 jours)
-  - Email masqué dans les réponses API (ex: us***@beac.int)
-  - Token reset sécurisé (secrets.token_urlsafe)
+#### Phase 1 : Authentification JWT (2025-11-22)
+- Login avec access + refresh tokens
+- Changement mot de passe obligatoire (first login)
+- Logout avec invalidation token
+- Refresh token automatique
+- Middleware vérification JWT
+- Guards Vue Router
 
-#### Phase 2-3 : Gestion Utilisateurs (2025-11-22)
-- **CRUD utilisateurs complet** (admin uniquement) :
-  - GET /users - Liste paginée avec filtres (search, role, is_active)
-  - POST /users - Création utilisateur
-  - GET /users/{id} - Détails utilisateur
-  - PUT /users/{id} - Mise à jour utilisateur
-  - DELETE /users/{id} - Suppression utilisateur
-- **Import/Export utilisateurs** :
-  - POST /users/import-excel - Import bulk depuis Excel
-  - GET /users/import-excel/template - Téléchargement template
-  - Validation complète des données importées
-  - Rapport détaillé (succès, erreurs)
-- **Gestion des mots de passe** :
-  - POST /users/{id}/reset-password - Réinitialisation (admin)
-  - Force changement au prochain login (configurable)
-- **Statistiques utilisateurs** :
-  - GET /users/stats/overview - Stats complètes
-  - Total, actifs, inactifs, par rôle
-  - Connexions récentes (7 derniers jours)
-- **Permissions par rôle** :
-  - ADMIN : Accès complet (CRUD users, stats, import)
-  - MANAGER : Lecture uniquement
-  - USER : Aucun accès gestion users
+#### Phase 2 : Gestion Utilisateurs (2025-11-22)
+- CRUD utilisateurs complet (admin)
+- Import Excel utilisateurs
+- Activation/désactivation comptes
+- Reset mot de passe (email dev/prod)
+- Page profil utilisateur
+- Statistiques utilisateurs
 
-#### Phase 3 : Frontend Authentification & Users (2025-11-22)
-- **Pages d'authentification** :
-  - Login.vue - Connexion avec matricule/password
-  - ChangePassword.vue - Changement de mot de passe
-  - ForgotPassword.vue - Réinitialisation mot de passe
-  - Profile.vue - Affichage et édition du profil
-- **Interface admin utilisateurs** :
-  - Users.vue - Liste complète avec filtres et pagination
-  - Création/édition utilisateur (modal)
-  - Suppression avec confirmation
-  - Reset password admin
-  - Import Excel avec rapport détaillé
-- **Stores Pinia** :
-  - `authStore` : login, logout, refresh, changePassword, updateProfile
-  - `usersStore` : CRUD users, import, stats, filtres, pagination
-- **Composants** :
-  - UserForm.vue - Formulaire création/édition
-  - UserImportDialog.vue - Import Excel
-  - Navigation mise à jour (menu profil, logout)
-- **Features UI** :
-  - Stats temps réel (cartes total/actifs/inactifs)
-  - Recherche instantanée
-  - Filtres par rôle et statut
-  - Pagination Element Plus
-  - Messages de confirmation/succès
-  - Gestion des erreurs
-
-#### Phase 4 : Tests (2025-11-22)
-- **60+ tests complets** :
-  - `test_auth.py` : 35 tests authentification
-    - TestLogin (5 tests)
-    - TestRefreshToken (3 tests)
-    - TestChangePassword (4 tests)
-    - TestForgotPassword (4 tests)
-    - TestProfile (5 tests)
-    - TestLogout (2 tests)
-  - `test_users.py` : 25+ tests gestion utilisateurs
-    - TestGetUsers (7 tests)
-    - TestCreateUser (6 tests)
-    - TestGetUser (2 tests)
-    - TestUpdateUser (4 tests)
-    - TestDeleteUser (2 tests)
-    - TestImportExcel (4 tests)
-    - TestResetPassword (3 tests)
-    - TestUserStats (1 test)
-- **Fixtures pytest** :
-  - 12 fixtures réutilisables (users, tokens, headers)
-  - Base SQLite in-memory pour tests rapides
-  - Support UUID compatible SQLite/PostgreSQL
-- **Script automatisé** :
-  - run_tests_sprint2.sh avec options (-auth, -users, -coverage)
-- **Documentation tests** :
-  - README_TESTS_SPRINT2.md (guide complet)
-  - CORRECTION_UUID.md (résolution erreurs SQLite)
-
-### 🔧 Modifié
-
-- **Modèles SQLAlchemy** :
-  - Type GUID personnalisé compatible SQLite ET PostgreSQL
-  - Remplacement UUID PostgreSQL par GUID universel
-  - Support tests SQLite in-memory (rapides)
-- **Services** :
-  - AuthService étendu (profile, forgot password)
-  - UserService avec validation email unique
-  - Logs audit pour toutes les actions sensibles
-- **API Endpoints** :
-  - PUT /auth/profile - Nouveau endpoint
-  - POST /auth/forgot-password - Nouveau endpoint
-  - GET /users/stats/overview - Retourne stats détaillées
-- **Frontend** :
-  - Store users.js - Calcul stats local si API échoue
-  - Mapping correct API response (total_users → total)
-  - Navigation profil dans AppLayout
-  - Lien "Mot de passe oublié" dans Login
-
-### 🐛 Corrigé
-
-- **Stats utilisateurs** :
-  - Actifs/Inactifs affichaient 0 au lieu des vraies valeurs
-  - Mapping incorrect (total_users vs total)
-  - Ajout fallback calcul local depuis liste users
-- **Tests SQLite** :
-  - Erreur CompileError UUID incompatible
-  - Création type GUID universel (SQLite + PostgreSQL)
-  - Fixtures sans ID fixe (auto-généré)
-- **Authentification** :
-  - Validation mot de passe renforcée
-  - Gestion compte inactif
-  - Messages d'erreur explicites
-
-### 🔒 Sécurité
-
-- **Validation renforcée** :
-  - Mots de passe : min 10 chars, complexité validée
-  - Email : validation format et unicité
-  - Matricule : validation unicité
-- **Protection données** :
-  - Email masqué dans forgot password (us***@beac.int)
-  - Tokens sécurisés (secrets.token_urlsafe)
-  - Audit logs complets (IP, user-agent)
-- **Permissions strictes** :
-  - Endpoints users protégés (admin uniquement)
-  - Vérification rôle à chaque requête
-  - Isolation des données par utilisateur
+#### Phase 3 : Interface Admin (2025-11-22)
+- Dashboard admin
+- Table utilisateurs paginée
+- Modals création/édition
+- Confirmation actions critiques
+- Design BEAC
 
 ### 📊 Statistiques Sprint 2
 
 - **Fichiers créés/modifiés** : ~45 fichiers
-- **Lignes de code** : ~4500 lignes (backend + frontend + tests)
-- **Tests** : 60+ tests (95 au total avec Sprint 1)
-- **Coverage** : Tests fonctionnels ✅ (SQLite UUID résolu)
-- **Endpoints API** : 15+ endpoints auth & users
-- **Pages frontend** : 7 pages (login, profile, users, etc.)
-- **Stores Pinia** : 2 stores (auth, users)
+- **Lignes de code** : ~4500 lignes
+- **Tests** : 60+ tests (95 au total)
+- **Endpoints API** : 15+ endpoints
 - **Durée** : 3 jours
-
-### 🎯 Objectifs Sprint 2 - Atteints
-
-- ✅ Authentification JWT complète (login, refresh, logout)
-- ✅ Changement mot de passe obligatoire
-- ✅ CRUD utilisateurs avec permissions par rôle
-- ✅ Import Excel utilisateurs opérationnel
-- ✅ Audit logs enregistrés pour toutes les actions
-- ✅ Tests complets (60+ tests auth & users)
-- ✅ Interface admin moderne et intuitive
-- ✅ Page profil utilisateur
-- ✅ Mot de passe oublié (email dev/prod)
-
-### 📦 Packages Livrés
-
-- **complete_profile_forgot_package.zip** (49 KB) - Frontend profil & forgot
-- **backend_endpoints_profile.zip** (25 KB) - Backend profil & forgot
-- **tests_sprint2.zip** (13 KB) - Tests complets
-- **correction_tests_uuid.zip** (7.2 KB) - Correction UUID SQLite
-- **correction_stats_mapping.zip** (3.5 KB) - Correction stats
 
 ---
 
-## [1.0.0-sprint1] - 2024-11-21
+## [1.0.0-sprint1] - 2025-11-21
 
 ### ✨ Ajouté
 
-#### Phase 1 : Infrastructure Docker (2024-11-21)
-- Docker Compose avec 6 services (PostgreSQL, Redis, Weaviate, Backend, Frontend, Nginx)
-- Configuration backend FastAPI avec hot reload
-- Configuration frontend Vue.js 3 avec Vite et hot reload (HMR)
-- Nginx comme reverse proxy avec support SSE
-- Structure modulaire backend (app/core, app/api, app/models, etc.)
-- Structure frontend Vue 3 avec Element Plus, Pinia, Vue Router
-- Configuration CORS et reverse proxy
-- Fichiers .env.example et .env.dev
-- Makefile avec commandes simplifiées
-- README.md et CHANGELOG.md initiaux
+#### Phase 1 : Infrastructure Docker (2025-11-21)
+- Docker Compose avec 6 services
+- PostgreSQL, Redis, Weaviate, Backend, Frontend, Nginx
+- Hot reload activé
 
-#### Phase 2 : Base de Données (2024-11-21)
-- 10 modèles SQLAlchemy avec relationships :
-  - **users** : Utilisateurs avec rôles (admin, manager, user)
-  - **categories** : Catégories de documents
-  - **documents** : Documents avec statut et métadonnées
-  - **chunks** : Chunks de texte indexés dans Weaviate
-  - **conversations** : Historique conversations utilisateurs
-  - **messages** : Messages user + assistant avec sources
-  - **feedbacks** : Évaluations des réponses (thumbs up/down)
-  - **token_usages** : Tracking coûts par opération
-  - **audit_logs** : Logs d'audit complets
-  - **system_configs** : Configuration dynamique
-- Configuration Alembic pour migrations
-- Migration initiale (001_initial.py) avec toutes les tables
-- Script d'initialisation DB (scripts/init_db.py)
-- Module sécurité (JWT + Bcrypt password hashing)
-- ~40 indexes optimisés sur les champs clés
-- 5 enums (UserRole, DocumentStatus, MessageRole, FeedbackRating, OperationType)
-- Relations CASCADE DELETE et SET NULL configurées
-- 10 foreign keys entre les tables
+#### Phase 2 : Base de Données (2025-11-21)
+- 10 modèles SQLAlchemy
+- Alembic migrations
+- 40+ indexes optimisés
 
-#### Phase 3 : Tests Unitaires (2024-11-21)
-- Configuration pytest avec coverage >80%
-- 33 tests unitaires répartis en 3 fichiers :
-  - **test_models.py** : 15 tests des modèles (User, Category, Document, etc.)
-  - **test_security.py** : 15 tests de sécurité (password hashing, JWT tokens)
-  - **test_api.py** : 3 tests API (health check, root, CORS)
-- 6 fixtures réutilisables (admin_user, manager_user, regular_user, etc.)
-- Base de données test (SQLite in-memory)
-- Markers pytest (unit, integration, slow)
-- Coverage report HTML automatique
-- Script de lancement des tests (run_tests.sh)
-
-#### Phase 4 : Documentation (2024-11-21)
-- README.md complet avec badges, architecture, guides
-- CHANGELOG.md détaillé
-- GUIDE_DEMARRAGE.md (10+ pages)
-- COMMANDES_RAPIDES.txt (aide-mémoire)
-- SPRINT1_PHASE1_SUMMARY.md
-- SPRINT1_PHASE2_SUMMARY.md
-- SPRINT1_PHASE3_SUMMARY.md
-- Documentation API (Swagger UI accessible à /api/docs)
-
-### 🔧 Modifié
-
-- Correction du healthcheck Weaviate (utilise wget au lieu de curl)
-- Correction Pydantic v2 (@field_validator au lieu de @validator)
-- Correction config Nginx pour routing API
-- Correction version bcrypt (4.0.1) pour compatibilité passlib
-- Correction conftest.py pour support SQLite avec UUID strings
-- Amélioration de la configuration pytest.ini
-
-### 🐛 Corrigé
-
-- Erreur 502 Bad Gateway sur backend (config Pydantic)
-- Erreur unhealthy sur container Weaviate
-- Erreur "ADMIN" enum PostgreSQL (utilisation de string "admin")
-- Erreur bcrypt password hashing (version incompatible)
-- Erreur SQLite UUID dans tests (conversion en strings)
-- Documentation Swagger OpenAPI non accessible
+#### Phase 3 : Tests Unitaires (2025-11-21)
+- 33 tests unitaires
+- Coverage >80%
 
 ### 📊 Statistiques Sprint 1
 
 - **Fichiers créés** : ~65 fichiers
-- **Lignes de code** : ~3000 lignes (backend + frontend + tests)
-- **Tests** : 33 tests unitaires
-- **Coverage** : 90.86% ✅
-- **Tables DB** : 10 tables
-- **Foreign keys** : 10 relations
-- **Indexes** : ~40 indexes
-- **Services Docker** : 6 services
+- **Lignes de code** : ~3000 lignes
+- **Tests** : 33 tests
+- **Coverage** : 90.86%
 - **Durée** : 2 jours
-
-### 🎯 Objectifs Sprint 1 - Atteints
-
-- ✅ Infrastructure Docker complète et fonctionnelle
-- ✅ Base de données PostgreSQL avec 10 tables optimisées
-- ✅ Tests unitaires avec coverage >80% (90.86% atteint)
-- ✅ Documentation complète et professionnelle
-- ✅ Hot reload activé (backend + frontend)
-- ✅ Sécurité (JWT + Bcrypt)
-- ✅ Migrations DB (Alembic)
 
 ---
 
 ## Notes de Version
 
-### [1.0.0-sprint2] - 2025-11-22
+### [1.0.0-sprint4] - 2025-11-23
 
-**Résumé** : Authentification JWT complète, gestion utilisateurs (CRUD + import Excel), interface admin moderne, tests complets.
+**Résumé** : Pipeline extraction documents complet avec OCR Mistral, chunking intelligent, et nettoyage texte.
 
 **Nouveautés** :
-- 🔐 Login avec JWT (access + refresh tokens)
-- 👤 Page profil utilisateur avec édition
-- 🔑 Mot de passe oublié (email dev/prod)
-- 👥 CRUD utilisateurs complet (admin)
-- 📊 Import Excel utilisateurs
-- 📈 Statistiques utilisateurs temps réel
-- 🧪 60+ tests auth & users
+- 📄 Extraction tous formats (PDF, DOCX, XLSX, PPTX, TXT, MD, RTF)
+- 🔍 OCR Mistral pour images intégrées
+- ✂️ Chunking intelligent avec overlap
+- 🧹 Nettoyage artefacts OCR automatique
+- 📊 Métadonnées enrichies (langue, titre, OCR)
+- ⚡ Pipeline asynchrone Celery
 
 **Prérequis** :
-- Docker 24+
-- Docker Compose 2.23+
-- Clé API Mistral
-- SMTP configuré (production uniquement)
+- Sprint 1-3 complétés
+- Clé API Mistral configurée
+- Celery workers démarrés
 
 **Installation** :
 ```bash
-# Démarrer les services
-make up
-make migrate
-make init-db
+# Appliquer migration
+docker-compose exec backend alembic upgrade head
 
-# Tester
-docker-compose exec backend pytest tests/ -v
+# Copier les fichiers
+cp document_processor.py backend/app/rag/
+cp ocr_processor.py backend/app/rag/
+cp text_cleaner.py backend/app/rag/
+cp processing_tasks.py backend/app/workers/
+cp chunking_tasks.py backend/app/workers/
+
+# Restart workers
+docker-compose restart celery-worker-processing celery-worker-chunking
 ```
 
-**Connexion** :
-- URL: http://localhost
-- Matricule: ADMIN001
-- Password: admin123 (à changer en production)
-
-**API Documentation** :
-- Swagger UI: http://localhost/api/docs
-- ReDoc: http://localhost/api/redoc
-
----
-
-### [1.0.0-sprint1] - 2024-11-21
-
-**Résumé** : Infrastructure complète, base de données, tests unitaires, et documentation.
-
-**Prérequis** :
-- Docker 24+
-- Docker Compose 2.23+
-- Clé API Mistral
-
-**Installation** :
+**Test** :
 ```bash
-make up
-make migrate
-make init-db
+# Upload document via API
+curl -X POST "http://localhost/api/v1/documents/upload" \
+  -H "Authorization: Bearer TOKEN" \
+  -F "files=@document.pdf" \
+  -F "category_id=UUID"
+
+# Vérifier statut
+curl "http://localhost/api/v1/documents/{id}/status" \
+  -H "Authorization: Bearer TOKEN"
 ```
-
-**Tests** :
-```bash
-make test
-```
-
-**Connexion Admin par défaut** :
-- Email: admin@beac.int
-- Password: Admin123!
-
-⚠️ **Changez le mot de passe admin en production !**
 
 ---
 

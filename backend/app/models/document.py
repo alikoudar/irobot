@@ -1,5 +1,5 @@
 """Document model."""
-from sqlalchemy import Column, String, Text, Integer, Float, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, Text, Integer, Float, DateTime, ForeignKey, Enum as SQLEnum, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -17,6 +17,23 @@ class DocumentStatus(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class ProcessingStage(str, enum.Enum):
+    """Document processing stage."""
+    VALIDATION = "VALIDATION"
+    EXTRACTION = "EXTRACTION"
+    CHUNKING = "CHUNKING"
+    EMBEDDING = "EMBEDDING"
+    INDEXING = "INDEXING"
+
+
+class ExtractionMethod(str, enum.Enum):
+    """Méthode d'extraction utilisée."""
+    TEXT = "TEXT"       # Extraction texte natif uniquement
+    OCR = "OCR"         # OCR complet (PDF scanné, images)
+    HYBRID = "HYBRID"   # Texte natif + OCR images intégrées
+    FALLBACK = "FALLBACK"  # Fallback sans OCR
+
+
 class Document(Base):
     """Document model."""
     
@@ -32,13 +49,16 @@ class Document(Base):
     # File info
     original_filename = Column(String(255), nullable=False)
     file_path = Column(String(500), nullable=False)
+    file_hash = Column(String(64), nullable=False, index=True)  # SHA-256 hash
     file_size_bytes = Column(Integer, nullable=False)
     mime_type = Column(String(100), nullable=False)
     file_extension = Column(String(10), nullable=False)
     
     # Processing
     status = Column(SQLEnum(DocumentStatus), default=DocumentStatus.PENDING, nullable=False, index=True)
+    processing_stage = Column(SQLEnum(ProcessingStage), nullable=True, index=True)
     error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0, nullable=False)
     
     # Content
     total_pages = Column(Integer, nullable=True)
@@ -53,6 +73,32 @@ class Document(Base):
     chunking_time_seconds = Column(Float, nullable=True)
     embedding_time_seconds = Column(Float, nullable=True)
     total_processing_time_seconds = Column(Float, nullable=True)
+
+    has_images = Column(
+        Boolean, 
+        default=False, 
+        nullable=False,
+        comment="Le document contient-il des images traitées par OCR ?"
+    )
+    image_count = Column(
+        Integer, 
+        default=0, 
+        nullable=False,
+        comment="Nombre d'images extraites et traitées par OCR"
+    )
+    ocr_completed = Column(
+        Boolean, 
+        default=False, 
+        nullable=False,
+        comment="L'OCR a-t-il été effectué sur ce document ?"
+    )
+    extraction_method = Column(
+        String(20),
+        default="TEXT",
+        nullable=False,
+        index=True,
+        comment="Méthode d'extraction: TEXT, OCR, HYBRID, FALLBACK"
+    )
     
     # Timestamps
     uploaded_at = Column(DateTime, default=datetime.utcnow, nullable=False)

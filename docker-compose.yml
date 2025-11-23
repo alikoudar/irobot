@@ -84,6 +84,111 @@ services:
     networks:
       - irobot-network
 
+  # ==================== CELERY WORKERS ====================
+  celery-worker-processing:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-celery-processing-dev
+    command: celery -A app.core.celery_app worker --queues=processing --concurrency=2 --loglevel=info --hostname=processing@%h
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - uploads_dev:/app/uploads
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
+  celery-worker-chunking:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-celery-chunking-dev
+    command: celery -A app.core.celery_app worker --queues=chunking --concurrency=2 --loglevel=info --hostname=chunking@%h
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
+  celery-worker-embedding:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-celery-embedding-dev
+    command: celery -A app.core.celery_app worker --queues=embedding --concurrency=2 --loglevel=info --hostname=embedding@%h
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
+  celery-worker-indexing:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-celery-indexing-dev
+    command: celery -A app.core.celery_app worker --queues=indexing --concurrency=2 --loglevel=info --hostname=indexing@%h
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - postgres
+      - weaviate
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-celery-beat-dev
+    command: celery -A app.core.celery_app beat --loglevel=info
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: irobot-flower-dev
+    command: celery -A app.core.celery_app flower --port=5555
+    env_file:
+      - ./backend/.env
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery-worker-processing
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
   # ==================== FRONTEND ====================
   frontend:
     build:

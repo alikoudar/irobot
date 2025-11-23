@@ -26,6 +26,29 @@ from app.schemas.category import (
     CategoryListResponse
 )
 
+from app.schemas.document import (
+    DocumentBase,
+    DocumentCreate,
+    DocumentUpdate,
+    DocumentResponse,
+    DocumentWithChunks,
+    DocumentListResponse,
+    DocumentStatusUpdate,
+    DocumentRetryRequest,
+    DocumentUploadResponse,
+    DocumentBatchUploadResponse
+)
+
+from app.schemas.chunk import (
+    ChunkBase,
+    ChunkCreate,
+    ChunkUpdate,
+    ChunkResponse,
+    ChunkWithDocument,
+    ChunkListResponse,
+    ChunkSearchResult
+)
+
 
 __all__ = [
     # User schemas
@@ -53,4 +76,25 @@ __all__ = [
     "CategoryResponse",
     "CategoryWithStats",
     "CategoryListResponse",
+
+     # Document schemas
+    "DocumentBase",
+    "DocumentCreate",
+    "DocumentUpdate",
+    "DocumentResponse",
+    "DocumentWithChunks",
+    "DocumentListResponse",
+    "DocumentStatusUpdate",
+    "DocumentRetryRequest",
+    "DocumentUploadResponse",
+    "DocumentBatchUploadResponse",
+    
+    # Chunk schemas
+    "ChunkBase",
+    "ChunkCreate",
+    "ChunkUpdate",
+    "ChunkResponse",
+    "ChunkWithDocument",
+    "ChunkListResponse",
+    "ChunkSearchResult",
 ]

@@ -1,7 +1,7 @@
 """Models package."""
 from app.models.user import User, UserRole
 from app.models.category import Category
-from app.models.document import Document, DocumentStatus
+from app.models.document import Document, DocumentStatus, ProcessingStage
 from app.models.chunk import Chunk
 from app.models.conversation import Conversation
 from app.models.message import Message, MessageRole
@@ -16,6 +16,7 @@ __all__ = [
     "Category",
     "Document",
     "DocumentStatus",
+    "ProcessingStage",
     "Chunk",
     "Conversation",
     "Message",
