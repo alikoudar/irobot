@@ -72,7 +72,7 @@
           <el-sub-menu index="management" v-if="isManagerOrAdmin">
             <template #title>
               <el-icon><Folder /></el-icon>
-              <span>Gestion Contenu</span>
+              <span>Ingestions</span>
             </template>
             <el-menu-item index="/documents">
               <el-icon><Document /></el-icon>

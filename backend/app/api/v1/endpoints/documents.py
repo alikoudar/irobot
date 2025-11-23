@@ -241,7 +241,7 @@ async def retry_document(
     2. Incrémente retry_count
     3. Relance le traitement via Celery
     """
-    document = DocumentService.retry_document(
+    document = await DocumentService.retry_document(
         db=db,
         document_id=document_id,
         current_user=current_user,
@@ -270,6 +270,9 @@ async def list_documents(
     search: Optional[str] = Query(None, description="Rechercher dans les noms de fichiers"),
     sort_by: str = Query("uploaded_at", description="Champ de tri"),
     sort_order: str = Query("desc", regex="^(asc|desc)$", description="Ordre de tri"),
+    file_types: Optional[str] = Query(None, description="Types de fichiers (séparés par virgule: pdf,docx,xlsx)"),
+    date_from: Optional[str] = Query(None, description="Date début (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="Date fin (YYYY-MM-DD)"),
     current_user: User = Depends(require_admin_or_manager),
     db: Session = Depends(get_db)
 ):
@@ -311,7 +314,10 @@ async def list_documents(
         uploaded_by=uploaded_by,
         search=search,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        file_types=file_types,      # NOUVEAU
+        date_from=date_from,        # NOUVEAU
+        date_to=date_to 
     )
 
 

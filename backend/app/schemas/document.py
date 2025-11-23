@@ -274,20 +274,56 @@ class DocumentStatusSSE(BaseModel):
 # ============================================================================
 
 class DocumentListItem(BaseModel):
-    """Item dans une liste de documents."""
+    """
+    Schema pour un item dans la liste des documents.
     
-    id: UUID
+    Inclut le nom de l'uploader et les informations de coûts calculées.
+    Optimisé pour l'affichage dans le frontend.
+    """
+    
+    id: uuid.UUID
     original_filename: str
-    file_extension: Optional[str] = None  
-    file_size_bytes: Optional[int] = None  
+    file_extension: str
+    file_size_bytes: int
+    file_hash: str  # ← AJOUTÉ
+    mime_type: Optional[str] = None  # ← AJOUTÉ
+    
+    # Status et progression
     status: str
-    processing_stage: str
+    processing_stage: Optional[str] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    
+    # Métriques document
     total_pages: Optional[int] = None
-    total_chunks: Optional[int] = None
-    category_id: Optional[UUID] = None  
-    uploaded_by: UUID
+    total_chunks: int = 0
+    
+    # Catégorie
+    category_id: Optional[uuid.UUID] = None
+    category_name: Optional[str] = None  # ← AJOUTÉ : Nom de la catégorie
+    
+    # Uploader - INFORMATIONS ENRICHIES
+    uploaded_by: uuid.UUID
+    uploader_name: Optional[str] = None  # ← AJOUTÉ : Nom complet de l'uploader
+    uploader_matricule: Optional[str] = None  # ← AJOUTÉ : Matricule
+    
+    # Timestamps
     uploaded_at: datetime
     processed_at: Optional[datetime] = None
+    
+    # Temps de traitement - AJOUTÉS
+    extraction_time_seconds: Optional[float] = None
+    chunking_time_seconds: Optional[float] = None
+    embedding_time_seconds: Optional[float] = None
+    indexing_time_seconds: Optional[float] = None
+    total_processing_time_seconds: Optional[float] = None  # ← Calculé
+    
+    # Coûts - AJOUTÉS
+    total_cost_usd: Optional[float] = None  # ← Coût total en USD
+    total_cost_xaf: Optional[float] = None  # ← Coût total en XAF
+    
+    # Métriques embedding - AJOUTÉS
+    total_tokens: Optional[int] = None
     
     class Config:
         from_attributes = True

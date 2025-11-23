@@ -99,7 +99,9 @@ class ChunkingTask(Task):
     name="app.workers.chunking_tasks.chunk_document",
     queue="chunking",
     max_retries=3,
-    default_retry_delay=30
+    default_retry_delay=30,
+    retry_backoff=True,         # ✅ Backoff exponentiel activé
+    retry_backoff_max=300 
 )
 def chunk_document(self, document_id: str) -> Dict[str, Any]:
     """

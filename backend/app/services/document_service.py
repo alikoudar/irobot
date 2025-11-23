@@ -20,7 +20,8 @@ from app.schemas.document import (
     DocumentCreate,
     DocumentUpdate,
     DocumentResponse,
-    DocumentListResponse
+    DocumentListResponse,
+    DocumentListItem
 )
 from app.utils.file_upload import (
     validate_and_prepare_file,
@@ -317,62 +318,84 @@ class DocumentService:
         }
     
     @staticmethod
-    def retry_document(
+    async def retry_document(
         db: Session,
         document_id: UUID,
-        current_user: User,
-        from_stage: Optional[str] = None
+        from_stage: str,
+        current_user: User
     ) -> Document:
         """
-        Relancer le traitement d'un document.
+        Relancer le traitement d'un document en erreur.
+        
+        MODIFICATION: Le retry manuel remet TOUJOURS retry_count à 0
+        car c'est une action volontaire de l'utilisateur après correction
+        du problème sous-jacent.
         
         Args:
             db: Session database
             document_id: ID du document
+            from_stage: Étape à partir de laquelle relancer
             current_user: Utilisateur courant
-            from_stage: Stage depuis lequel recommencer (optionnel)
             
         Returns:
             Document mis à jour
         """
-        document = DocumentService.get_document_by_id(db, document_id, current_user)
+        from app.models.document import Document, DocumentStatus, ProcessingStage
+        from app.models.audit_log import AuditLog
+        
+        # Récupérer le document
+        document = db.query(Document).filter(Document.id == document_id).first()
         
         if not document:
             raise HTTPException(status_code=404, detail="Document non trouvé")
         
-        # Vérifier que le document est en échec
+        # Vérifier que le document est en erreur
         if document.status != DocumentStatus.FAILED:
             raise HTTPException(
-                status_code=400,
-                detail="Seuls les documents en échec peuvent être relancés"
+                status_code=400, 
+                detail=f"Le document n'est pas en erreur (status: {document.status})"
             )
         
-        # Limite de retry
-        if document.retry_count >= 3:
-            raise HTTPException(
-                status_code=400,
-                detail="Nombre maximum de tentatives atteint (3)"
-            )
-        
-        # Réinitialiser le status
+        # =================================================================
+        # CORRECTION : Réinitialiser le compteur de retry
+        # Le retry manuel est une action volontaire après correction du problème
+        # =================================================================
+        document.retry_count = 0  # ← LIGNE AJOUTÉE
         document.status = DocumentStatus.PENDING
-        document.processing_stage = ProcessingStage.VALIDATION
+        document.processing_stage = ProcessingStage(from_stage)
         document.error_message = None
-        document.retry_count += 1
-        
-        # NOUVEAU : Réinitialiser les métadonnées d'extraction
-        document.document_metadata = {}
         
         db.commit()
         db.refresh(document)
         
-        # Relancer le traitement
-        extract_document_text.apply_async(
-            args=[str(document.id)],
-            queue="processing"
+        # Créer l'audit log
+        audit_log = AuditLog(
+            user_id=current_user.id,
+            action="RETRY",
+            entity_type="DOCUMENT",
+            entity_id=document.id,
+            details={
+                "filename": document.original_filename,
+                "from_stage": from_stage,
+                "retry_count_reset": True  # ← Indique que le compteur a été remis à 0
+            }
         )
+        db.add(audit_log)
+        db.commit()
         
-        logger.info(f"Retrying document {document.id} (attempt {document.retry_count})")
+        # Lancer la tâche appropriée selon l'étape
+        if from_stage == "VALIDATION" or from_stage == "EXTRACTION":
+            from app.workers.processing_tasks import extract_document_text
+            extract_document_text.delay(str(document.id))
+        elif from_stage == "CHUNKING":
+            from app.workers.chunking_tasks import chunk_document
+            chunk_document.delay(str(document.id))
+        elif from_stage == "EMBEDDING":
+            from app.workers.embedding_tasks import embed_chunks
+            embed_chunks.delay(str(document.id))
+        elif from_stage == "INDEXING":
+            from app.workers.indexing_tasks import index_to_weaviate
+            index_to_weaviate.delay(str(document.id))
         
         return document
     
@@ -388,65 +411,98 @@ class DocumentService:
         search: Optional[str] = None,
         sort_by: str = "uploaded_at",
         sort_order: str = "desc",
-        # NOUVEAU : Filtres extraction hybride
         has_images: Optional[bool] = None,
-        extraction_method: Optional[str] = None
+        extraction_method: Optional[str] = None,
+        file_types: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None
     ) -> DocumentListResponse:
         """
         Lister les documents avec filtres et pagination.
         
-        Args:
-            db: Session database
-            current_user: Utilisateur courant
-            page: Numéro de page
-            limit: Nombre de résultats par page
-            category_id: Filtrer par catégorie
-            status: Filtrer par status
-            uploaded_by: Filtrer par uploadeur
-            search: Recherche textuelle
-            sort_by: Champ de tri
-            sort_order: Ordre de tri (asc/desc)
-            has_images: NOUVEAU - Filtrer par présence d'images OCR
-            extraction_method: NOUVEAU - Filtrer par méthode d'extraction
-            
-        Returns:
-            DocumentListResponse avec items et pagination
+        MODIFICATION: Retourne DocumentListItem avec informations enrichies
+        (nom uploader, coûts, temps de traitement).
         """
+        from app.models.document import Document, DocumentStatus
+        from app.models.user import User as UserModel
+        from app.models.category import Category
+        
+        # Construction de la requête de base avec jointure pour l'uploader
         query = db.query(Document)
         
-        # Les managers ne voient que leurs documents
-        if current_user.role == "manager":
+        # Filtrage par rôle
+        if current_user.role.value != "ADMIN":
+            # Manager ne voit que ses propres documents
             query = query.filter(Document.uploaded_by == current_user.id)
+        elif uploaded_by:
+            # Admin peut filtrer par uploader
+            query = query.filter(Document.uploaded_by == uploaded_by)
         
-        # Filtres standard
+        # Filtre par catégorie
         if category_id:
             query = query.filter(Document.category_id == category_id)
         
+        # Filtre par status
         if status:
             try:
-                status_enum = DocumentStatus(status)
+                status_enum = DocumentStatus(status.upper())
                 query = query.filter(Document.status == status_enum)
             except ValueError:
                 pass
         
-        if uploaded_by:
-            query = query.filter(Document.uploaded_by == uploaded_by)
-        
+        # Recherche dans le nom de fichier
         if search:
-            query = query.filter(Document.original_filename.ilike(f"%{search}%"))
-        
-        # NOUVEAU : Filtres extraction hybride (JSON)
-        if has_images is not None:
             query = query.filter(
-                Document.document_metadata['has_images'].astext.cast(db.bind.dialect.type_compiler.process(db.bind.dialect.type_descriptor(type(has_images)))) == str(has_images).lower()
+                Document.original_filename.ilike(f"%{search}%")
             )
         
-        if extraction_method:
-            query = query.filter(
-                Document.document_metadata['extraction_method'].astext == extraction_method
-            )
+            # =========================================================================
+        # NOUVEAU : Filtre par types de fichiers
+        # =========================================================================
+        if file_types:
+            types_list = [t.strip().lower() for t in file_types.split(',')]
+            
+            # Mapper les types génériques vers les extensions réelles
+            extensions = []
+            for t in types_list:
+                if t == 'image':
+                    extensions.extend(['png', 'jpg', 'jpeg', 'webp', 'gif'])
+                elif t == 'txt':
+                    extensions.extend(['txt', 'md', 'rtf'])
+                elif t == 'doc':
+                    extensions.extend(['doc', 'docx'])
+                elif t == 'xls':
+                    extensions.extend(['xls', 'xlsx'])
+                elif t == 'ppt':
+                    extensions.extend(['ppt', 'pptx'])
+                else:
+                    extensions.append(t)
+            
+            if extensions:
+                query = query.filter(Document.file_extension.in_(extensions))
         
-        # Compter le total
+        # =========================================================================
+        # NOUVEAU : Filtre par plage de dates
+        # =========================================================================
+        if date_from:
+            try:
+                from datetime import datetime
+                start_date = datetime.strptime(date_from, "%Y-%m-%d")
+                query = query.filter(Document.uploaded_at >= start_date)
+            except ValueError:
+                pass  # Ignorer si format invalide
+        
+        if date_to:
+            try:
+                from datetime import datetime, timedelta
+                # Ajouter 1 jour pour inclure toute la journée de fin
+                end_date = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+                query = query.filter(Document.uploaded_at < end_date)
+            except ValueError:
+                pass  # Ignorer si format invalide
+        
+
+        # Compter le total avant pagination
         total = query.count()
         
         # Tri
@@ -458,16 +514,101 @@ class DocumentService:
         
         # Pagination
         offset = (page - 1) * limit
-        items = query.offset(offset).limit(limit).all()
+        documents = query.offset(offset).limit(limit).all()
+        
+        # Construire les items enrichis
+        items = []
+        for doc in documents:
+            # Récupérer l'uploader
+            uploader = db.query(UserModel).filter(UserModel.id == doc.uploaded_by).first()
+            uploader_name = None
+            uploader_matricule = None
+            if uploader:
+                uploader_name = f"{uploader.prenom} {uploader.nom}".strip()
+                uploader_matricule = uploader.matricule
+            
+            # Récupérer la catégorie
+            category_name = None
+            if doc.category_id:
+                category = db.query(Category).filter(Category.id == doc.category_id).first()
+                if category:
+                    category_name = category.name
+            
+            # Calculer les coûts depuis les métadonnées
+            total_cost_usd = 0.0
+            total_cost_xaf = 0.0
+            total_tokens = 0
+            
+            if doc.document_metadata:
+                meta = doc.document_metadata
+                
+                # Coût OCR
+                if meta.get("ocr_stats"):
+                    total_cost_usd += meta["ocr_stats"].get("cost_usd", 0) or 0
+                    total_cost_xaf += meta["ocr_stats"].get("cost_xaf", 0) or 0
+                
+                # Coût embedding
+                if meta.get("embedding_stats"):
+                    total_cost_usd += meta["embedding_stats"].get("cost_usd", 0) or 0
+                    total_cost_xaf += meta["embedding_stats"].get("cost_xaf", 0) or 0
+                    total_tokens += meta["embedding_stats"].get("total_tokens", 0) or 0
+            
+            # Calculer le temps total de traitement
+            total_processing_time = 0.0
+            if doc.extraction_time_seconds:
+                total_processing_time += doc.extraction_time_seconds
+            if doc.chunking_time_seconds:
+                total_processing_time += doc.chunking_time_seconds
+            if doc.embedding_time_seconds:
+                total_processing_time += doc.embedding_time_seconds
+            
+            # Temps d'indexation depuis les métadonnées
+            indexing_time = None
+            if doc.document_metadata and doc.document_metadata.get("indexing_stats"):
+                indexing_time = doc.document_metadata["indexing_stats"].get("indexing_time_seconds")
+                if indexing_time:
+                    total_processing_time += indexing_time
+            
+            # Créer l'item enrichi
+            item = DocumentListItem(
+                id=doc.id,
+                original_filename=doc.original_filename,
+                file_extension=doc.file_extension,
+                file_size_bytes=doc.file_size_bytes,
+                file_hash=doc.file_hash,
+                mime_type=doc.mime_type,
+                status=doc.status.value,
+                processing_stage=doc.processing_stage.value if doc.processing_stage else None,
+                error_message=doc.error_message,
+                retry_count=doc.retry_count or 0,
+                total_pages=doc.total_pages,
+                total_chunks=doc.total_chunks or 0,
+                category_id=doc.category_id,
+                category_name=category_name,
+                uploaded_by=doc.uploaded_by,
+                uploader_name=uploader_name,
+                uploader_matricule=uploader_matricule,
+                uploaded_at=doc.uploaded_at,
+                processed_at=doc.processed_at,
+                extraction_time_seconds=doc.extraction_time_seconds,
+                chunking_time_seconds=doc.chunking_time_seconds,
+                embedding_time_seconds=doc.embedding_time_seconds,
+                indexing_time_seconds=indexing_time,
+                total_processing_time_seconds=total_processing_time if total_processing_time > 0 else None,
+                total_cost_usd=total_cost_usd if total_cost_usd > 0 else None,
+                total_cost_xaf=total_cost_xaf if total_cost_xaf > 0 else None,
+                total_tokens=total_tokens if total_tokens > 0 else None
+            )
+            items.append(item)
         
         # Calculer le nombre de pages
-        pages = (total + limit - 1) // limit
+        total_pages = (total + limit - 1) // limit
         
         return DocumentListResponse(
             items=items,
             total=total,
             page=page,
-            pages=pages
+            pages=total_pages
         )
     
     @staticmethod

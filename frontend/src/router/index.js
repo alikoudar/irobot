@@ -59,7 +59,7 @@ const router = createRouter({
     {
       path: '/documents',
       name: 'documents',
-      component: () => import('../views/Home.vue'),
+      component: () => import('../views/admin/Documents.vue'),
       meta: { requiresAuth: true, requiresManager: true }
     },
     // ============================================================================
