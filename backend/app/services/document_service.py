@@ -28,6 +28,8 @@ from app.utils.file_upload import (
     delete_file,
     UPLOAD_MAX_SIZE
 )
+
+from app.models.audit_log import AuditLog
 from app.workers.processing_tasks import extract_document_text
 
 logger = logging.getLogger(__name__)
@@ -139,6 +141,24 @@ class DocumentService:
             db.commit()
             for doc in uploaded_documents:
                 db.refresh(doc)
+
+                audit_log = AuditLog(
+                    user_id=current_user.id,
+                    action="DOCUMENT_CREATED",
+                    entity_type="DOCUMENT",
+                    entity_id=doc.id,
+                    details={
+                        "filename": doc.original_filename,
+                        "file_size": doc.file_size_bytes,
+                        "file_type": doc.file_extension,
+                        "category_id": str(category_id),
+                        "status": str(doc.status.value) if hasattr(doc.status, 'value') else str(doc.status)
+                    }
+                )
+                db.add(audit_log)
+            
+            # Commit des audit logs
+            db.commit()
         
         return {
             "uploaded": len(uploaded_documents),

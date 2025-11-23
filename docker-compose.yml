@@ -38,7 +38,7 @@ services:
       - irobot-network
 
   weaviate:
-    image: semitechnologies/weaviate:1.23.0
+    image: semitechnologies/weaviate:1.28.0
     container_name: irobot-weaviate-dev
     environment:
       QUERY_DEFAULTS_LIMIT: 25

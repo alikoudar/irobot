@@ -7,6 +7,7 @@ from app.models.conversation import Conversation
 from app.models.message import Message, MessageRole
 from app.models.feedback import Feedback, FeedbackRating
 from app.models.token_usage import TokenUsage, OperationType
+from app.models.exchange_rate import ExchangeRate
 from app.models.audit_log import AuditLog
 from app.models.system_config import SystemConfig
 
@@ -27,4 +28,5 @@ __all__ = [
     "OperationType",
     "AuditLog",
     "SystemConfig",
+    "ExchangeRate",
 ]

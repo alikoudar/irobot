@@ -10,3 +10,4 @@ from app.models.feedback import Feedback  # noqa
 from app.models.token_usage import TokenUsage  # noqa
 from app.models.audit_log import AuditLog  # noqa
 from app.models.system_config import SystemConfig  # noqa
+from app.models.exchange_rate import ExchangeRate

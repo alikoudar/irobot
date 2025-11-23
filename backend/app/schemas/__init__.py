@@ -49,6 +49,50 @@ from app.schemas.chunk import (
     ChunkSearchResult
 )
 
+# Token Usage schemas
+from app.schemas.token_usage import (
+    OperationType,
+    TokenUsageBase,
+    TokenUsageCreate,
+    TokenUsageResponse,
+    TokenUsageSummary,
+    TokenUsageByOperation,
+    TokenUsageByModel,
+    TokenUsageByDate,
+    TokenUsageStats,
+    TokenUsageFilter,
+    TokenUsageList,
+)
+
+# Exchange Rate schemas
+from app.schemas.exchange_rate import (
+    ExchangeRateBase,
+    ExchangeRateCreate,
+    ExchangeRateResponse,
+    CurrentExchangeRate,
+    ConversionRequest,
+    ConversionResponse,
+    ExchangeRateList,
+    ExchangeRateStats,
+)
+
+# System Config schemas
+from app.schemas.system_config import (
+    SystemConfigBase,
+    SystemConfigCreate,
+    SystemConfigUpdate,
+    SystemConfigResponse,
+    ConfigGroup,
+    SystemConfigBulkUpdate,
+    SystemConfigList,
+    DEFAULT_CONFIGS,
+    ModelConfigKeys,
+    ChunkingConfigKeys,
+    SearchConfigKeys,
+    CacheConfigKeys,
+    PricingConfigKeys,
+)
+
 
 __all__ = [
     # User schemas
@@ -97,4 +141,42 @@ __all__ = [
     "ChunkWithDocument",
     "ChunkListResponse",
     "ChunkSearchResult",
+
+    # Token Usage schemas
+    "OperationType",
+    "TokenUsageBase",
+    "TokenUsageCreate",
+    "TokenUsageResponse",
+    "TokenUsageSummary",
+    "TokenUsageByOperation",
+    "TokenUsageByModel",
+    "TokenUsageByDate",
+    "TokenUsageStats",
+    "TokenUsageFilter",
+    "TokenUsageList",       
+
+    # Exchange Rate schemas
+    "ExchangeRateBase",
+    "ExchangeRateCreate",
+    "ExchangeRateResponse",
+    "CurrentExchangeRate",
+    "ConversionRequest",
+    "ConversionResponse",
+    "ExchangeRateList",
+    "ExchangeRateStats",    
+
+    # System Config schemas
+    "SystemConfigBase",
+    "SystemConfigCreate",
+    "SystemConfigUpdate",
+    "SystemConfigResponse",
+    "ConfigGroup",
+    "SystemConfigBulkUpdate",
+    "SystemConfigList",
+    "DEFAULT_CONFIGS",  
+    "ModelConfigKeys",
+    "ChunkingConfigKeys",
+    "SearchConfigKeys",     
+    "CacheConfigKeys",
+    "PricingConfigKeys",
 ]
