@@ -1,10 +1,15 @@
 /**
  * Store Pinia pour l'authentification
+ * 
+ * CORRECTION : Reset du chat store lors de la connexion
+ * pour éviter d'afficher les messages d'un autre utilisateur
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authService } from '../services/api/auth'
 import { ElMessage } from 'element-plus'
+import { useChatStore } from './chat'
+
 
 export const useAuthStore = defineStore('auth', () => {
   // State
@@ -49,6 +54,15 @@ export const useAuthStore = defineStore('auth', () => {
       // Sauvegarder l'utilisateur
       currentUser.value = data.user
 
+      // =====================================================================
+      // CORRECTION : Réinitialiser le chat store pour éviter d'afficher
+      // les messages d'un autre utilisateur
+      // =====================================================================
+      const chatStore = useChatStore()
+      chatStore.reset()
+      console.log('🔄 Chat store réinitialisé après login')
+      // =====================================================================
+
       ElMessage.success('Connexion réussie')
       return true
     } catch (err) {
@@ -78,6 +92,14 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       isLoading.value = false
+
+      // =====================================================================
+      // CORRECTION : Réinitialiser aussi le chat store à la déconnexion
+      // =====================================================================
+      const chatStore = useChatStore()
+      chatStore.reset()
+      console.log('🔄 Chat store réinitialisé après logout')
+      // =====================================================================
 
       ElMessage.info('Déconnexion réussie')
     }

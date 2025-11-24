@@ -147,6 +147,7 @@
           </el-descriptions-item>
         </el-descriptions>
       </div>
+      <ProfileStats />
     </div>
   </div>
 </template>
@@ -157,6 +158,7 @@ import { useRouter } from 'vue-router'
 import { Edit, Lock, Document } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
+import ProfileStats from '@/components/profile/ProfileStats.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()

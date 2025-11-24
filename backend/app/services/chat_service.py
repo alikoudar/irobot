@@ -125,6 +125,14 @@ class ChatService:
             f"ChatService initialisé - History: {config['history_limit']}, "
             f"TopK: {config['search_top_k']}, TopN: {config['rerank_top_n']}"
         )
+
+    def _truncate_excerpt(self, text: Optional[str], max_length: int = 500) -> Optional[str]:
+        '''Tronque l'extrait à max_length caractères.'''
+        if not text:
+            return None
+        if len(text) <= max_length:
+            return text
+        return text[:max_length - 3] + "..."   
     
     # =========================================================================
     # PIPELINE PRINCIPAL
@@ -276,15 +284,17 @@ class ChatService:
         
         # Envoyer les sources
         source_refs = [
-            SourceReference(
-                document_id=s.get("document_id", ""),
-                title=s.get("title", ""),
-                category=s.get("category"),
-                page=s.get("page"),
-                relevance_score=s.get("relevance_score")
-            )
-            for s in sources
-        ]
+                SourceReference(
+                    document_id=s.get("document_id", ""),
+                    title=s.get("title", ""),
+                    category=s.get("category"),
+                    page=s.get("page"),
+                    chunk_index=s.get("chunk_index"),
+                    relevance_score=s.get("relevance_score"),
+                    excerpt=self._truncate_excerpt(s.get("text") or s.get("content") or s.get("excerpt"))
+                )
+                for s in sources
+            ]
         
         yield {
             "event": "sources",
@@ -440,9 +450,18 @@ class ChatService:
         ]
         
         # Extraire les sources
-        sources = [
-            result.chunk.to_source_dict() for result in reranked_results
-        ]
+        sources = []
+        for result in reranked_results:
+            chunk = result.chunk
+            source_dict = chunk.to_source_dict()
+            # Ajouter explicitement le texte du chunk
+            if hasattr(chunk, 'text') and chunk.text:
+                source_dict['text'] = chunk.text
+            elif hasattr(chunk, 'content') and chunk.content:
+                source_dict['text'] = chunk.content
+            # Ajouter le score de pertinence
+            source_dict['relevance_score'] = result.relevance_score / 10.0
+            sources.append(source_dict)
         
         # Envoyer les sources
         source_refs = [
@@ -451,7 +470,9 @@ class ChatService:
                 title=s.get("title", ""),
                 category=s.get("category"),
                 page=s.get("page"),
-                relevance_score=s.get("relevance_score")
+                chunk_index=s.get("chunk_index"),
+                relevance_score=s.get("relevance_score"),
+                excerpt=self._truncate_excerpt(s.get("text") or s.get("content") or s.get("excerpt"))
             )
             for s in sources
         ]
@@ -676,14 +697,15 @@ class ChatService:
                     Message.conversation_id == conv.id
                 ).order_by(desc(Message.created_at)).first()
                 
+                MAX_PREVIEW_LENGTH = 100
                 last_preview = None
                 if last_message:
                     content = last_message.content
-                    last_preview = content[:100] + "..." if len(content) > 100 else content
+                    last_preview = content[:MAX_PREVIEW_LENGTH - 3] + "..." if len(content) > 100 else content
                 
                 summaries.append(ConversationSummary(
                     id=conv.id,
-                    title=conv.title,
+                    title=conv.title or "Nouvelle conversation",
                     is_archived=conv.is_archived,
                     updated_at=conv.updated_at,
                     message_count=message_count,

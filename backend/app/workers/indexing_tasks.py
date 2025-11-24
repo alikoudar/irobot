@@ -7,6 +7,8 @@ Ce worker :
 3. Insère en batch dans Weaviate
 4. Met à jour les weaviate_id des chunks
 5. Met à jour le document: status=COMPLETED
+
+CORRECTION : Sépare chunks et vectors pour batch_insert()
 """
 import logging
 import time
@@ -148,6 +150,7 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
         # =================================================================
         
         chunks_data = []
+        vectors_data = []  # CORRECTION : Liste séparée pour les vecteurs
         missing_embeddings = 0
         
         for chunk in chunks:
@@ -160,18 +163,22 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
                 missing_embeddings += 1
                 continue
             
+            # CORRECTION : Ajouter le chunk sans le vecteur
             chunks_data.append({
                 "chunk_id": str(chunk.id),
                 "content": chunk.content,
-                "vector": embedding,
+                "text": chunk.content,  # Ajout pour la recherche BM25
                 "document_id": str(document.id),
                 "chunk_index": chunk.chunk_index,
                 "document_title": document_title,
                 "category_name": category_name,
-                "page_number": chunk.page_number,
+                "page_number": chunk.page_number or 0,
                 "filename": document.original_filename,
                 "file_type": document.file_extension,
             })
+            
+            # CORRECTION : Ajouter le vecteur dans la liste séparée
+            vectors_data.append(embedding)
         
         if not chunks_data:
             raise ValueError(f"Aucun chunk avec embedding pour le document {document_id}")
@@ -202,16 +209,19 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
         all_weaviate_ids = []
         
         for i in range(0, len(chunks_data), WEAVIATE_BATCH_SIZE):
-            batch = chunks_data[i:i + WEAVIATE_BATCH_SIZE]
+            batch_chunks = chunks_data[i:i + WEAVIATE_BATCH_SIZE]
+            batch_vectors = vectors_data[i:i + WEAVIATE_BATCH_SIZE]  # CORRECTION
+            
             batch_num = (i // WEAVIATE_BATCH_SIZE) + 1
             total_batches = (len(chunks_data) + WEAVIATE_BATCH_SIZE - 1) // WEAVIATE_BATCH_SIZE
             
             logger.info(
                 f"Document {document_id}: Indexation batch {batch_num}/{total_batches} "
-                f"({len(batch)} chunks)"
+                f"({len(batch_chunks)} chunks)"
             )
             
-            result = weaviate_client.batch_insert(batch)
+            # CORRECTION : Passer chunks ET vectors séparément
+            result = weaviate_client.batch_insert(batch_chunks, batch_vectors)
             
             total_indexed += result.success_count
             total_errors += result.error_count

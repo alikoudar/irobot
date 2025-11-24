@@ -39,16 +39,21 @@ const router = createRouter({
       }
     },
     {
-      path: '/chat',
-      name: 'chat',
-      component: () => import('../views/Home.vue'),
-      meta: { requiresAuth: true }
+    path: '/chat',
+    name: 'chat',
+    component: () => import('../views/user/Chat.vue'),
+    meta: { requiresAuth: true }
     },
     {
-      path: '/history',
-      name: 'history',
-      component: () => import('../views/Home.vue'),
-      meta: { requiresAuth: true }
+    path: '/conversations',
+    name: 'conversations',
+    component: () => import('../views/user/Conversations.vue'),
+    meta: { requiresAuth: true }
+    },
+    // Redirection de l'ancienne route /history vers /conversations
+    {
+    path: '/history',
+    redirect: '/conversations'
     },
     {
       path: '/feedbacks',

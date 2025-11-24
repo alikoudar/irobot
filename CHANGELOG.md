@@ -7,11 +7,186 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-### À venir - Sprint 8
-- Interface Chat Vue.js
-- Composants conversation
-- Affichage sources et citations
+### À venir - Sprint 9
 - Tests E2E Playwright
+- Optimisations performance
+- Monitoring et métriques
+
+---
+
+## [1.0.0-sprint8] - 2025-11-24
+
+### ✨ Ajouté
+
+#### Phase 1 : Interface Chat Vue.js (2025-11-24)
+- **ChatView.vue** :
+  - Vue principale du chatbot
+  - Sidebar conversations (liste, recherche, archivage)
+  - Zone de messages avec scroll automatique
+  - Input message avec envoi Enter/Ctrl+Enter
+  - Bouton nouvelle conversation
+- **MessageBubble.vue** :
+  - Affichage messages USER/ASSISTANT
+  - Formatage Markdown (listes, code, tableaux)
+  - Indicateur de streaming (curseur clignotant)
+  - Horodatage et métadonnées
+  - Support texte blanc sur fond bleu (USER)
+- **SourcesList.vue** :
+  - Liste des sources collapsée par défaut
+  - Modal détails avec preview du chunk
+  - Score de pertinence visuel (barre de progression)
+  - Bouton copier l'extrait (cherche dans 15+ champs)
+- **FeedbackButtons.vue** :
+  - Boutons pouce haut/bas
+  - Feedback persisté en base
+  - Animation de confirmation
+- **ConversationsList.vue** :
+  - Liste conversations triées par date
+  - Recherche temps réel
+  - Actions (archiver, supprimer, renommer)
+  - Indicateur conversation active
+
+#### Phase 2 : Store Pinia Chat (2025-11-24)
+- **chat.js** :
+  - State : conversations, messages, streaming
+  - Actions : fetchConversations, sendMessage, addFeedback
+  - Support streaming SSE avec `/api/v1/chat/stream`
+  - Fallback machine à écrire si pas de streaming
+  - Reset automatique au changement d'utilisateur
+  - Gestion AbortController pour annulation
+
+#### Phase 3 : Corrections UX (2025-11-24)
+- **Texte blanc sur fond bleu** (messages USER)
+- **Espacement compact** dans le formatage Markdown
+- **Sources après réponse** (pas pendant le streaming)
+- **Sources collapsées par défaut**
+- **Preview chunk** au lieu de redirection document
+- **Stats feedback à 0** par défaut (pas d'estimation)
+
+### 🛠️ Corrigé
+
+#### Frontend
+- **Texte utilisateur illisible** :
+  - Texte noir sur fond bleu → CSS forcé `color: #ffffff !important`
+- **Espacement excessif Markdown** :
+  - Listes et paragraphes trop espacés → Parser compact + CSS réduit
+- **Bouton copier désactivé** :
+  - Condition `!excerpt` bloquante → Cherche dans 15+ champs possibles
+- **Redirection "Voir document"** :
+  - Utilisateurs sans accès aux documents → Preview du chunk dans modal
+- **Stats feedback erronées** :
+  - Estimation `Math.ceil(total * 0.1)` → Valeurs à 0 par défaut
+- **Sources affichées trop tôt** :
+  - Pendant le streaming → Condition `!message.isStreaming` ajoutée
+- **Messages d'un autre utilisateur** :
+  - Store non réinitialisé → Reset au login/logout dans auth.js
+
+#### Backend
+- **`RerankResult.score` inexistant** :
+  - Attribut `score` → Corrigé en `relevance_score`
+- **Score > 1 (validation Pydantic)** :
+  - Scores 0-10 du reranker → Normalisés `/10.0` pour 0-1
+- **`batch_insert()` argument manquant** :
+  - Un seul argument (batch) → Séparation chunks et vectors
+- **`excerpt: null` dans sources** :
+  - Texte du chunk non inclus → Ajout dans SourceReference
+
+#### Infrastructure
+- **Redémarrage nginx/frontend requis** :
+  - DNS cache Nginx → Resolver Docker dynamique avec variable
+
+### 🔧 Modifié
+
+- **auth.js** :
+  - Ajout reset du chat store au login
+  - Ajout reset du chat store au logout
+- **chat.js** :
+  - Endpoint `/api/v1/chat/stream` (au lieu de `/chat/send`)
+  - Support roles MAJUSCULE (USER, ASSISTANT)
+  - Détection changement d'utilisateur
+- **MessageBubble.vue** :
+  - CSS `.user .message-text { color: #ffffff !important }`
+  - Parser Markdown compact `parseListsCompact()`
+  - Condition sources `&& !message.isStreaming`
+- **SourcesList.vue** :
+  - `expanded = ref(false)` (collapsé par défaut)
+  - `excerptContent` cherche dans 15+ champs
+  - Bouton "Voir document" supprimé → Preview chunk
+- **ProfileStats.vue** :
+  - Stats à 0 par défaut, chargement depuis API uniquement
+- **nginx_dev.conf** :
+  - Ajout `resolver 127.0.0.11 valid=10s`
+  - Variables pour `proxy_pass` (résolution DNS dynamique)
+- **indexing_tasks.py** :
+  - Séparation `chunks_data` et `vectors_data`
+  - Appel `batch_insert(chunks, vectors)`
+- **chat_service.py** :
+  - `result.relevance_score` au lieu de `result.score`
+  - Normalisation score `/10.0` pour SourceReference
+  - Ajout `excerpt` dans les sources
+
+### 📊 Statistiques Sprint 8
+
+- **Fichiers créés** : 8 fichiers frontend
+  - ChatView.vue (~450 lignes)
+  - MessageBubble.vue (~745 lignes)
+  - SourcesList.vue (~485 lignes)
+  - FeedbackButtons.vue (~200 lignes)
+  - ConversationsList.vue (~350 lignes)
+  - chat.js store (~890 lignes)
+  - ProfileStats.vue (~540 lignes)
+  - auth.js modifié (~250 lignes)
+- **Fichiers corrigés** : 5 fichiers
+  - nginx_dev.conf
+  - indexing_tasks.py
+  - chat_service.py
+  - MessageBubble.vue (corrections V2)
+  - SourcesList.vue (corrections V2)
+- **Lignes de code** : ~3900 lignes
+- **Corrections** : 12 bugs (7 frontend, 4 backend, 1 infra)
+- **Durée** : 1 jour
+
+### 🎯 Objectifs Sprint 8 - Atteints
+
+- ✅ Interface Chat Vue.js complète
+- ✅ Composants conversation réutilisables
+- ✅ Affichage sources avec preview chunk
+- ✅ Streaming SSE temps réel
+- ✅ Feedbacks utilisateur (pouce haut/bas)
+- ✅ Formatage Markdown des réponses
+- ✅ Reset store au changement d'utilisateur
+- ✅ Sources collapsées par défaut
+- ✅ Résolution DNS Nginx dynamique
+- ✅ Corrections UX multiples
+
+### 📦 Fichiers Livrés
+
+```
+frontend/src/views/
+├── ChatView.vue                 # Vue principale chat
+
+frontend/src/components/chat/
+├── MessageBubble.vue            # Bulle de message
+├── SourcesList.vue              # Liste sources collapsable
+├── FeedbackButtons.vue          # Boutons feedback
+├── ConversationsList.vue        # Sidebar conversations
+
+frontend/src/components/profile/
+├── ProfileStats.vue             # Stats utilisateur
+
+frontend/src/stores/
+├── chat.js                      # Store Pinia chat
+├── auth.js                      # Store auth (modifié)
+
+backend/app/workers/
+├── indexing_tasks.py            # Worker indexation (corrigé)
+
+backend/app/services/
+├── chat_service.py              # Service chat (corrigé)
+
+nginx/
+├── nginx_dev.conf               # Config Nginx (corrigé)
+```
 
 ---
 
@@ -259,45 +434,30 @@ Question utilisateur
             │ NO                      │ YES
             ↓                         ↓
 ┌─────────────────────────┐    ┌──────────────────┐
-│  PIPELINE RAG COMPLET   │    │  RETURN CACHED   │
-│  1. Embedding question  │    │  (similarity)    │
-│  2. Hybrid search (10)  │    └──────────────────┘
-│  3. Reranking (3)       │
-│  4. PromptBuilder       │  ← NOUVEAU Sprint 7
-│  5. MistralGenerator    │  ← NOUVEAU Sprint 7
-│  6. Streaming SSE       │  ← NOUVEAU Sprint 7
-│  7. save_to_cache()     │
-│  8. track_token_usage() │  ← NOUVEAU Sprint 7
+│  EMBEDDING              │    │  RETURN SIMILAR  │
+│  mistral-embed          │    │  + increment_hit │
+└───────────┬─────────────┘    └──────────────────┘
+            ↓
+┌─────────────────────────┐
+│  RECHERCHE HYBRIDE      │
+│  BM25 + Semantic (α=0.7)│
+└───────────┬─────────────┘
+            ↓
+┌─────────────────────────┐
+│  RERANKING              │
+│  Top 10 → Top 3         │
+└───────────┬─────────────┘
+            ↓
+┌─────────────────────────┐
+│  GÉNÉRATION LLM         │
+│  Mistral + Streaming    │
+└───────────┬─────────────┘
+            ↓
+┌─────────────────────────┐
+│  SAVE TO CACHE          │
+│  + Token tracking       │
 └─────────────────────────┘
 ```
-
-### ⚠️ Limitations Actuelles
-
-- Frontend chat non développé (Sprint 8)
-- WebSocket non implémenté (SSE utilisé)
-- Historique conversation limité à 5 messages
-- Pas de feedback utilisateur (Sprint 9)
-
-### 🚀 Prochaines Étapes (Sprint 8)
-
-1. **Interface Chat Vue.js** :
-   - Composant ChatWindow.vue
-   - Composant MessageBubble.vue
-   - Composant SourceCard.vue
-
-2. **Streaming Frontend** :
-   - EventSource SSE
-   - Affichage progressif tokens
-   - Indicateur "typing..."
-
-3. **Gestion Conversations** :
-   - Liste conversations sidebar
-   - Nouvelle conversation
-   - Suppression conversation
-
-4. **Tests E2E** :
-   - Playwright tests
-   - Scénarios complets
 
 ---
 
@@ -305,283 +465,123 @@ Question utilisateur
 
 ### ✨ Ajouté
 
-#### Phase 1 : Modèles Cache (2025-11-23)
-- **QueryCache** :
-  - Stockage questions/réponses avec hash SHA-256
-  - Embedding vectoriel 1024 dimensions pour similarité
-  - TTL 7 jours configurable
-  - Métriques : hit_count, tokens économisés, coûts USD/XAF
-  - Méthodes : is_expired(), increment_hit(), reset_ttl()
-- **CacheDocumentMap** :
-  - Mapping N:N cache ↔ documents
-  - Clés étrangères avec CASCADE
-  - Index pour invalidation rapide
-- **CacheStatistics** :
-  - Statistiques journalières agrégées
-  - hit_rate calculé automatiquement
-  - Méthodes : increment_hit(), increment_miss(), get_summary()
-- **Schémas Pydantic** :
-  - QueryCacheCreate, QueryCacheResponse, CacheHitResponse
-  - CacheStatisticsResponse, CacheDashboardStats
-- **Migration Alembic** :
-  - sprint6_001_cache_models.py
-  - 3 tables avec index optimisés
-
-#### Phase 2 : Retriever & Reranker (2025-11-23)
+#### Phase 1 : Retriever Hybride (2025-11-23)
 - **HybridRetriever** :
-  - Recherche hybride BM25 + Sémantique dans Weaviate
-  - Alpha configurable depuis DB (défaut: 0.75)
-  - Top-K configurable depuis DB (défaut: 10)
-  - Filtres par catégorie et documents
-  - Singleton : get_retriever()
+  - Recherche hybride BM25 + sémantique
+  - Paramètre alpha configurable (0=BM25, 1=semantic)
+  - Filtres par catégorie, document_id
+  - Score fusion pondéré
+- **Configurations depuis DB** :
+  - search.top_k (défaut: 10)
+  - search.hybrid_alpha (défaut: 0.7)
+- **RetrievedChunk** (dataclass) :
+  - chunk_id, document_id, text, score
+  - Métadonnées : title, category, page, chunk_index
+
+#### Phase 2 : Reranker Mistral (2025-11-23)
 - **MistralReranker** :
-  - Reranking avec mistral-small-latest
-  - Scoring 0-10 avec reasoning
-  - Top-N configurable depuis DB (défaut: 3)
-  - Tarifs lus depuis DB
-  - Singleton : get_reranker()
-- **RetrievedChunk** :
-  - Dataclass avec scores BM25/vector
-  - Méthodes : to_dict(), to_source_dict()
+  - Évaluation pertinence avec mistral-small
+  - Prompt JSON structuré (score 0-10 + reason)
+  - Tri par score décroissant
+  - Top N configurable depuis DB
 - **RerankResult** :
-  - Score de pertinence + explanation
+  - chunk, relevance_score, reasoning
+  - Méthodes : to_dict(), to_source_dict()
 - **Configurations dynamiques** :
-  - search.top_k, search.hybrid_alpha
   - models.reranking.model_name, models.reranking.top_k
-  - mistral.pricing.small
 
 #### Phase 3 : Cache Service (2025-11-23)
 - **CacheService** :
   - check_cache_level1() - Hash exact SHA-256
   - check_cache_level2() - Similarité cosine > 0.95
-  - check_cache() - Combiné L1 puis L2
   - save_to_cache() - Sauvegarde avec mappings
   - invalidate_cache_for_document() - Invalidation cascade
-  - invalidate_expired_cache() - Nettoyage périodique
   - get_statistics() - Stats agrégées
-- **Utilitaires mathématiques** :
-  - cosine_similarity() - Similarité vectorielle
-  - compute_query_hash() - Hash normalisé
 - **Configurations depuis DB** :
   - cache.query_ttl_seconds (défaut: 604800 = 7 jours)
   - cache.similarity_threshold (défaut: 0.95)
-- **Singleton** : get_cache_service()
 
 #### Phase 4 : Tests Complets (2025-11-23)
-- **Tests Modèles Cache** (40 tests) :
-  - QueryCache : création, hash, expiration, hits
-  - CacheDocumentMap : création, relations
-  - CacheStatistics : hit_rate, increment, summary
-- **Tests Retriever & Reranker** (27 tests) :
-  - Config depuis DB
-  - Recherche hybride, filtres
-  - Reranking, scoring
-  - Pipeline intégré
-- **Tests CacheService** (41 tests) :
-  - Cosine similarity
-  - Cache L1 hit/miss
-  - Cache L2 hit/miss (similarité)
-  - Sauvegarde, invalidation
-  - TTL reset on hit
-  - Statistiques
-
-### 🔧 Modifié
-
-- **Architecture configs** :
-  - Toutes les configs RAG lues depuis system_configs via ConfigService
-  - Pattern identique à mistral_client.py
-  - Fallback si DB non disponible
-- **Package app/rag/** :
-  - Ajout retriever.py, reranker.py
-  - Export dans __init__.py
-- **Package app/services/** :
-  - Ajout cache_service.py
+- **Tests Modèles Cache** (40 tests)
+- **Tests Retriever & Reranker** (27 tests)
+- **Tests CacheService** (41 tests)
 
 ### 📊 Statistiques Sprint 6
 
-- **Fichiers créés** : 9 fichiers
-  - query_cache.py (~250 lignes)
-  - cache_document_map.py (~120 lignes)
-  - cache_statistics.py (~280 lignes)
-  - cache.py (schémas ~350 lignes)
-  - retriever.py (~450 lignes)
-  - reranker.py (~400 lignes)
-  - cache_service.py (~550 lignes)
-  - Migration Alembic (~250 lignes)
-  - Tests simples (3 fichiers ~2000 lignes)
-- **Lignes de code** : ~4650 lignes
-- **Tests** : 108 tests (40 + 27 + 41)
-- **Coverage** : >90%
-- **Durée** : 7 jours
-
-### 🎯 Objectifs Sprint 6 - Atteints
-
-- ✅ Hybrid search fonctionnel (BM25 + Sémantique)
-- ✅ Reranking avec Mistral OK
-- ✅ Cache L1 (correspondance exacte via hash) OK
-- ✅ Cache L2 (similarité > 0.95) OK
-- ✅ Invalidation cache par document OK
-- ✅ Stats cache calculées (hit_rate, tokens, coûts)
-- ✅ Configs depuis DB (ConfigService)
-- ✅ Tests > 80% (108 tests passés)
-
-### 📦 Fichiers Livrés
-
-```
-backend/app/models/
-├── query_cache.py           # Modèle cache Q/R
-├── cache_document_map.py    # Mapping cache ↔ documents
-├── cache_statistics.py      # Statistiques journalières
-
-backend/app/schemas/
-├── cache.py                 # Schémas Pydantic cache
-
-backend/app/rag/
-├── retriever.py             # HybridRetriever
-├── reranker.py              # MistralReranker
-├── __init__.py              # Exports package
-
-backend/app/services/
-├── cache_service.py         # CacheService complet
-
-backend/alembic/versions/
-├── sprint6_001_cache_models.py  # Migration tables cache
-
-tests/
-├── test_cache_models_simple.py      # Tests modèles (40)
-├── test_retriever_reranker_simple.py # Tests RAG (27)
-├── test_cache_service_simple.py     # Tests service (41)
-```
+- **Fichiers créés** : 7 fichiers
+- **Lignes de code** : ~3500 lignes
+- **Tests** : 108 tests
+- **Durée** : 2 jours
 
 ---
 
-## [1.0.0-sprint4] - 2025-11-23
+## [1.0.0-sprint5] - 2025-11-23
 
 ### ✨ Ajouté
 
-#### Phase 1 : Pipeline Extraction Documents (2025-11-23)
-- **DocumentProcessor hybride** :
-  - Extraction texte natif PDF (pypdf)
-  - Extraction DOCX (python-docx)
-  - Extraction PPTX (python-pptx)
-  - Extraction XLSX (openpyxl)
+#### Phase 1 : Client Mistral (2025-11-23)
+- **MistralClient** :
+  - generate_embeddings() - Embedding texte
+  - generate_embeddings_batch() - Batch embeddings
+  - process_image_ocr() - OCR images
+  - chat_completion() - Chat LLM
+- **Gestion erreurs et retry** :
+  - Retry exponentiel (3 tentatives)
+  - Timeout configurable
+  - Logging détaillé
+
+#### Phase 2 : Client Weaviate (2025-11-23)
+- **WeaviateClient** :
+  - create_collection() - Création schema
+  - batch_insert() - Insertion batch
+  - hybrid_search() - Recherche hybride
+  - delete_document_chunks() - Suppression
+
+#### Phase 3 : Workers Embedding (2025-11-23)
+- **embedding_tasks.py** :
+  - embed_chunks - Embedding par batch
+  - Gestion erreurs par chunk
+  - Mise à jour métadonnées
+
+#### Phase 4 : Workers Indexation (2025-11-23)
+- **indexing_tasks.py** :
+  - index_to_weaviate - Indexation Weaviate
+  - Batch insert avec retry
+  - Nettoyage embeddings après indexation
+
+### 📊 Statistiques Sprint 5
+
+- **Fichiers créés** : 5 fichiers
+- **Lignes de code** : ~2000 lignes
+- **Durée** : 1 jour
+
+---
+
+## [1.0.0-sprint4] - 2025-11-22
+
+### ✨ Ajouté
+
+#### Phase 1 : Extraction Documents (2025-11-22)
+- **DocumentProcessor** :
+  - Extraction PDF (PyMuPDF + OCR fallback)
+  - Extraction DOCX, XLSX, PPTX
   - Extraction TXT, MD, RTF
-  - OCR Mistral pour images intégrées
-  - Détection automatique PDF scanné vs natif
-  - Méthode d'extraction : TEXT, OCR, HYBRID, FALLBACK
-- **MistralOCRClient** :
-  - extract_text_from_image() - OCR image unique
-  - extract_text_from_pdf() - OCR PDF complet
-  - batch_process_images() - OCR batch
-  - Support formats : PNG, JPG, JPEG, WEBP, GIF
-  - Retour Markdown structuré (tableaux, titres)
+  - OCR images intégrées
 
-#### Phase 2 : Workers Celery (2025-11-23)
-- **Processing Worker** (celery-worker-processing) :
-  - extract_document_text() - Extraction hybride
-  - Nettoyage caractères NULL (\u0000) pour PostgreSQL
-  - Estimation pages pour DOCX/TXT (2500 chars/page)
-  - Mise à jour colonnes OCR (has_images, image_count, etc.)
-  - Retry automatique (max 3, backoff exponentiel)
-- **Chunking Worker** (celery-worker-chunking) :
-  - chunk_document() - Découpage intelligent
-  - Nettoyage artefacts OCR (--Mo, \-n, etc.)
-  - Préservation structure (tableaux, listes)
-  - Métadonnées enrichies par chunk
-  - Détection langue document
-  - Génération weaviate_id temporaire
-
-#### Phase 3 : Modèle Document enrichi (2025-11-23)
-- **Nouvelles colonnes OCR** :
-  - has_images (BOOLEAN) - Document avec images OCR
-  - image_count (INTEGER) - Nombre d'images traitées
-  - ocr_completed (BOOLEAN) - OCR effectué
-  - extraction_method (VARCHAR) - TEXT, OCR, HYBRID, FALLBACK
-- **Migration Alembic** :
-  - 20241124_add_ocr_columns.py
-  - Index sur extraction_method et has_images
-  - Compatible documents existants
-
-#### Phase 4 : Module Text Cleaner (2025-11-23)
-- **text_cleaner.py** :
-  - sanitize_text_for_postgres() - Supprime \u0000
-  - remove_ocr_artifacts() - Nettoie artefacts OCR
-  - normalize_whitespace() - Normalise espaces
-  - clean_punctuation() - Corrige ponctuation
-  - detect_document_language() - Détection fr/en
-  - extract_document_title() - Extraction titre
-
-### 🔧 Modifié
-
-- **Modèle Document** :
-  - Ajout 4 colonnes OCR (has_images, image_count, ocr_completed, extraction_method)
-  - Enums en MAJUSCULES (DocumentStatus, ProcessingStage, ExtractionMethod)
-  - Méthodes helper : update_extraction_info(), update_chunking_info()
-- **Modèle Chunk** :
-  - weaviate_id généré temporairement (UUID)
-  - Métadonnées enrichies (has_ocr_content, has_table, document_language)
-- **Configuration Celery** :
-  - Queue "processing" pour extraction
-  - Queue "chunking" pour découpage
-  - Retry avec backoff exponentiel
-
-### 🛠️ Corrigé
-
-- **Erreur PostgreSQL \u0000** :
-  - Caractères NULL dans texte extrait
-  - Solution : sanitize_text_for_postgres() avant stockage
-- **Erreur weaviate_id NOT NULL** :
-  - Contrainte NOT NULL sur chunks.weaviate_id
-  - Solution : UUID temporaire généré au chunking
-- **Estimation pages DOCX** :
-  - Retournait toujours 1 page
-  - Solution : Estimation basée sur caractères (2500/page)
-- **Artefacts OCR** :
-  - Fragments "--Mo", "\-n" dans texte
-  - Solution : Module text_cleaner avec regex
+#### Phase 2 : Workers Celery (2025-11-22)
+- **processing_tasks.py** :
+  - process_document - Extraction texte
+  - Chaînage vers chunking
+- **chunking_tasks.py** :
+  - chunk_document - Découpage intelligent
+  - Overlap configurable
 
 ### 📊 Statistiques Sprint 4
 
 - **Fichiers créés** : 8 fichiers
-  - document_processor.py (~400 lignes)
-  - ocr_processor.py (~150 lignes)
-  - processing_tasks.py (~350 lignes)
-  - chunking_tasks.py (~300 lignes)
-  - text_cleaner.py (~200 lignes)
-  - Migration Alembic (~80 lignes)
 - **Lignes de code** : ~1500 lignes
-- **Workers Celery** : 2 workers (processing, chunking)
-- **Formats supportés** : 10 formats (PDF, DOCX, XLSX, PPTX, TXT, MD, RTF, PNG, JPG, etc.)
+- **Formats supportés** : 10 formats
 - **Durée** : 1 jour
-
-### 🎯 Objectifs Sprint 4 - Atteints
-
-- ✅ Extraction texte tous formats (PDF, DOCX, XLSX, PPTX, TXT, MD, RTF)
-- ✅ OCR Mistral pour images intégrées
-- ✅ Détection automatique PDF scanné
-- ✅ Pipeline asynchrone Celery (processing → chunking)
-- ✅ Chunking intelligent avec overlap
-- ✅ Nettoyage artefacts OCR
-- ✅ Métadonnées enrichies (langue, titre, has_ocr)
-- ✅ Estimation pages pour formats sans pagination
-- ✅ Colonnes OCR en base (has_images, extraction_method)
-- ✅ Enums MAJUSCULES (norme projet)
-
-### 📦 Fichiers Livrés
-
-```
-backend/app/rag/
-├── document_processor.py      # Extraction hybride
-├── ocr_processor.py           # Client Mistral OCR
-├── text_cleaner.py            # Nettoyage texte
-
-backend/app/workers/
-├── processing_tasks.py        # Worker extraction
-├── chunking_tasks.py          # Worker chunking
-
-backend/alembic/versions/
-├── 20241124_add_ocr_columns.py  # Migration OCR
-```
 
 ---
 
@@ -590,34 +590,13 @@ backend/alembic/versions/
 ### ✨ Ajouté
 
 #### Phase 1 : Backend Catégories (2025-11-22)
-- **CRUD catégories complet** :
-  - GET /categories - Liste paginée avec recherche
-  - POST /categories - Création catégorie
-  - GET /categories/{category_id} - Détails catégorie
-  - PUT /categories/{category_id} - Modification catégorie
-  - DELETE /categories/{category_id} - Suppression catégorie
-- **Modèle Category** :
-  - Champs : id, name, description, color, created_by, timestamps
-  - Relation vers User (créateur)
-  - Validation unicité du nom
-- **6 Schemas Pydantic** :
-  - CategoryBase, CategoryCreate, CategoryUpdate
-  - CategoryResponse, CategoryWithStats, CategoryList
-- **Service CategoryService** :
-  - 8 méthodes (get_categories, create, update, delete, etc.)
-  - Pagination et recherche full-text
-  - Statistiques (count documents par catégorie)
-- **Permissions par rôle** :
-  - Admin : CRUD complet
-  - Manager : CRUD complet
-  - User : Aucun accès (403 Forbidden)
+- **CRUD catégories complet**
+- **6 Schemas Pydantic**
+- **Service CategoryService**
+- **Permissions par rôle**
 
 #### Phase 2 : Seeds Catégories (2025-11-22)
-- **4 catégories initiales BEAC** :
-  - Lettres Circulaires (#005CA9 - Bleu BEAC)
-  - Décisions du Gouverneur (#C2A712 - Or BEAC)
-  - Procédures et Modes Opératoires (#4A90E2 - Bleu clair)
-  - Clauses et Conditions Générales (#50C878 - Vert émeraude)
+- **4 catégories initiales BEAC**
 
 #### Phase 3 : Frontend Catégories (2025-11-22)
 - **Store Pinia categories.js**
@@ -639,15 +618,12 @@ backend/alembic/versions/
 
 #### Phase 1 : Authentification JWT (2025-11-22)
 - Login avec access + refresh tokens
-- Changement mot de passe obligatoire (first login)
+- Changement mot de passe obligatoire
 - Logout avec invalidation token
-- Refresh token automatique
 
 #### Phase 2 : Gestion Utilisateurs (2025-11-22)
 - CRUD utilisateurs complet (admin)
 - Import Excel utilisateurs
-- Activation/désactivation comptes
-- Reset mot de passe
 
 #### Phase 3 : Interface Admin (2025-11-22)
 - Dashboard admin
@@ -669,7 +645,6 @@ backend/alembic/versions/
 #### Phase 1 : Infrastructure Docker (2025-11-21)
 - Docker Compose avec 6 services
 - PostgreSQL, Redis, Weaviate, Backend, Frontend, Nginx
-- Hot reload activé
 
 #### Phase 2 : Base de Données (2025-11-21)
 - 10 modèles SQLAlchemy
@@ -692,75 +667,46 @@ backend/alembic/versions/
 
 ## Notes de Version
 
-### [1.0.0-sprint7] - 2025-11-24
+### [1.0.0-sprint8] - 2025-11-24
 
-**Résumé** : Pipeline RAG complet avec génération LLM et streaming SSE.
+**Résumé** : Interface Chat Vue.js complète avec streaming et corrections UX.
 
 **Nouveautés** :
-- 🤖 Generator Mistral avec streaming SSE
-- 📝 Prompts système BEAC stricts (anti-hallucination)
-- 💬 Endpoints Chat REST complets
-- 📊 Token tracking et calcul coûts
-- 🔧 12 corrections bugs intégration
-- ✅ 135 tests unitaires
+- 💬 Interface Chat complète (5 composants)
+- 📡 Streaming SSE temps réel
+- 📚 Sources collapsables avec preview chunk
+- 👍 Feedbacks utilisateur
+- 🔄 Reset store au changement utilisateur
+- 🔧 12 corrections (frontend, backend, infra)
 
 **Prérequis** :
-- Sprint 1-6 complétés
-- Clé API Mistral configurée
+- Sprint 1-7 complétés
+- Backend avec endpoints `/v1/chat/stream`
 - Weaviate avec chunks indexés
 
 **Installation** :
 ```bash
-# Copier les fichiers corrigés
-cp retriever_fixed.py backend/app/rag/retriever.py
-cp prompts_fixed.py backend/app/rag/prompts.py
-cp generator_fixed.py backend/app/rag/generator.py
-cp weaviate_client_fixed.py backend/app/clients/weaviate_client.py
-cp cache_service_fixed.py backend/app/services/cache_service.py
+# Frontend
+cp sprint8-fixes-v2/components/chat/* frontend/src/components/chat/
+cp sprint8-fixes-v2/components/profile/* frontend/src/components/profile/
+cp sprint8-fixes-v2/stores/* frontend/src/stores/
 
-# Réduire température (recommandé)
-docker exec -it irobot-db-1 psql -U irobot -d irobot_db -c "
-UPDATE system_configs 
-SET value = '{\"model_name\": \"mistral-medium-latest\", \"max_tokens\": 2048, \"temperature\": 0.2}'
-WHERE key = 'models.generation';
-"
+# Backend
+cp sprint8-fixes-v2/backend/workers/indexing_tasks.py backend/app/workers/
 
-# Vider le cache
-docker exec -it irobot-db-1 psql -U irobot -d irobot_db -c "DELETE FROM query_cache;"
+# Nginx
+cp sprint8-fixes-v2/nginx/nginx_dev.conf nginx/
 
 # Restart
-docker-compose restart backend
+docker-compose restart
 ```
 
-### [1.0.0-sprint6] - 2025-11-23
+### [1.0.0-sprint7] - 2025-11-24
 
-**Résumé** : Recherche hybride et cache intelligent 2 niveaux.
-
-**Nouveautés** :
-- 🔍 Recherche hybride BM25 + Sémantique
-- 🎯 Reranking Mistral (top 10 → top 3)
-- 💾 Cache L1 (hash exact) + L2 (similarité > 95%)
-- ⚡ Invalidation automatique par document
-- 📊 Statistiques cache (hit_rate, économies)
-- ⚙️ Configs dynamiques depuis DB
-
-**Prérequis** :
-- Sprint 1-4 complétés
-- Clé API Mistral configurée
-- Weaviate opérationnel
+**Résumé** : Pipeline RAG complet avec génération LLM et streaming SSE.
 
 **Installation** :
 ```bash
-# Appliquer migration
-docker-compose exec backend alembic upgrade head
-
-# Copier les fichiers
-cp query_cache.py cache_document_map.py cache_statistics.py backend/app/models/
-cp cache.py backend/app/schemas/
-cp retriever.py reranker.py backend/app/rag/
-cp cache_service.py backend/app/services/
-
-# Restart services
 docker-compose restart backend
 ```
 

@@ -126,6 +126,14 @@ class ConversationSummary(BaseModel):
         description="Aperçu du dernier message (tronqué)"
     )
 
+class ConversationSummaryListResponse(BaseModel):
+    """Schema de réponse pour une liste de résumés de conversations."""
+    
+    conversations: List[ConversationSummary]  # ← Utilise ConversationSummary
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
 
 # =============================================================================
 # SCHEMAS POUR LE CHAT

@@ -31,6 +31,7 @@ from app.schemas.conversation import (
     ConversationListResponse,
     ConversationUpdate,
     ConversationArchive,
+    ConversationSummaryListResponse
 )
 from app.schemas.feedback import FeedbackCreate, FeedbackResponse
 from app.services.chat_service import get_chat_service
@@ -177,14 +178,14 @@ async def chat_sync(
 # ENDPOINTS CONVERSATIONS
 # =============================================================================
 
-@router.get("/conversations", response_model=ConversationListResponse)
+@router.get("/conversations", response_model=ConversationSummaryListResponse)
 async def list_conversations(
     page: int = Query(default=1, ge=1, description="Numéro de page"),
     page_size: int = Query(default=20, ge=1, le=100, description="Taille de la page"),
     include_archived: bool = Query(default=False, description="Inclure les conversations archivées"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
+) -> ConversationSummaryListResponse:
     """
     Liste les conversations de l'utilisateur.
     
@@ -211,12 +212,12 @@ async def list_conversations(
     
     has_more = (skip + len(conversations)) < total
     
-    return ConversationListResponse(
+    return ConversationSummaryListResponse(
         conversations=conversations,
         total=total,
         page=page,
         page_size=page_size,
-        has_more=has_more
+        has_more=(page * page_size) < total
     )
 
 
