@@ -396,9 +396,13 @@ export const useChatStore = defineStore('chat', () => {
       }
       
       // Marquer le streaming comme terminé
+      // CORRECTION V4 : Utiliser findIndex avec l'ID temporaire
       const msgIndex = messages.value.findIndex(m => m.id === assistantMessage.id)
       if (msgIndex !== -1) {
-        messages.value[msgIndex].isStreaming = false
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
+          isStreaming: false
+        }
       }
       
       console.log('✅ Message envoyé avec succès')
@@ -465,9 +469,13 @@ export const useChatStore = defineStore('chat', () => {
       await handleJSONWithTypingEffect(data, assistantMessage, userMessage)
       
       // Marquer comme terminé
+      // CORRECTION V4 : Utiliser findIndex avec l'ID temporaire
       const msgIndex = messages.value.findIndex(m => m.id === assistantMessage.id)
       if (msgIndex !== -1) {
-        messages.value[msgIndex].isStreaming = false
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
+          isStreaming: false
+        }
       }
       
       if (!convId) {
@@ -542,12 +550,24 @@ export const useChatStore = defineStore('chat', () => {
   
   /**
    * Traiter un événement du stream
+   * 
+   * CORRIGÉ V4 : Utilise findIndex() avec l'ID temporaire qui NE CHANGE JAMAIS.
+   * Force la réactivité Vue en remplaçant l'objet dans l'array.
+   * 
+   * IMPORTANT : On garde l'ID temporaire (temp-assistant-xxx) tout au long du streaming.
+   * L'ID serveur est stocké dans server_message_id pour référence future.
    */
   function processStreamEvent(data, assistantMessage) {
     const eventType = data.event || data.type
+    
+    // CORRECTION V4 : Utiliser findIndex() avec l'ID temporaire qui ne change JAMAIS
+    // Pinia wrappe les objets dans des Proxies, donc indexOf() ne fonctionne pas
     const msgIndex = messages.value.findIndex(m => m.id === assistantMessage.id)
     
-    if (msgIndex === -1) return
+    if (msgIndex === -1) {
+      console.warn('⚠️ Message assistant introuvable:', assistantMessage.id)
+      return
+    }
     
     switch (eventType) {
       case 'start':
@@ -562,7 +582,14 @@ export const useChatStore = defineStore('chat', () => {
           }
         }
         streamingMessageId.value = data.message_id
-        messages.value[msgIndex].id = data.message_id || messages.value[msgIndex].id
+        
+        // CORRECTION V4 : Stocker l'ID serveur via messages.value[msgIndex]
+        // Ne JAMAIS modifier assistantMessage.id (on garde l'ID temporaire)
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
+          server_message_id: data.message_id
+        }
+        
         console.log('📡 Stream start:', data.conversation_id)
         break
         
@@ -571,19 +598,36 @@ export const useChatStore = defineStore('chat', () => {
         // Nouveau token de contenu
         const tokenContent = data.content || data.token || ''
         streamingContent.value += tokenContent
-        messages.value[msgIndex].content = streamingContent.value
+        
+        // CORRECTION : Forcer la réactivité Vue en créant un nouvel objet
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
+          content: streamingContent.value
+        }
+        
+        // Debug: afficher les premiers tokens
+        if (streamingContent.value.length < 50) {
+          console.log('🔤 Token reçu, contenu actuel:', streamingContent.value.substring(0, 50))
+        }
         break
         
       case 'sources':
         // Sources de la réponse
         streamingSources.value = data.sources || []
-        messages.value[msgIndex].sources = streamingSources.value
+        
+        // CORRECTION : Forcer la réactivité Vue
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
+          sources: streamingSources.value
+        }
         console.log('📚 Sources:', streamingSources.value.length)
         break
         
       case 'metadata':
         // Métadonnées finales
-        Object.assign(messages.value[msgIndex], {
+        // CORRECTION : Forcer la réactivité Vue
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
           token_count_input: data.token_count_input,
           token_count_output: data.token_count_output,
           cost_usd: data.cost_usd,
@@ -591,13 +635,17 @@ export const useChatStore = defineStore('chat', () => {
           cache_hit: data.cache_hit,
           response_time_seconds: data.response_time_seconds,
           model_used: data.model_used
-        })
+        }
         break
         
       case 'done':
       case 'end':
         // Fin du streaming
-        messages.value[msgIndex].isStreaming = false
+        // CORRECTION : Forcer la réactivité Vue
+        messages.value[msgIndex] = {
+          ...messages.value[msgIndex],
+          isStreaming: false
+        }
         console.log('✅ Stream done')
         break
         
@@ -611,25 +659,42 @@ export const useChatStore = defineStore('chat', () => {
         if (data.content || data.token) {
           const content = data.content || data.token || ''
           streamingContent.value += content
-          messages.value[msgIndex].content = streamingContent.value
+          
+          // CORRECTION : Forcer la réactivité Vue
+          messages.value[msgIndex] = {
+            ...messages.value[msgIndex],
+            content: streamingContent.value
+          }
         }
         // Vérifier s'il y a des sources
         if (data.sources && Array.isArray(data.sources)) {
           streamingSources.value = data.sources
-          messages.value[msgIndex].sources = streamingSources.value
+          
+          // CORRECTION : Forcer la réactivité Vue
+          messages.value[msgIndex] = {
+            ...messages.value[msgIndex],
+            sources: streamingSources.value
+          }
         }
     }
   }
   
   /**
    * Gérer une réponse JSON avec effet machine à écrire
+   * 
+   * CORRIGÉ V4 : Utilise findIndex() avec les IDs temporaires qui ne changent jamais.
+   * Force la réactivité Vue en créant de nouveaux objets.
    */
   async function handleJSONWithTypingEffect(data, assistantMessage, userMessage) {
     // Mettre à jour l'ID du message utilisateur
     if (data.user_message_id) {
       const userMsgIndex = messages.value.findIndex(m => m.id === userMessage.id)
       if (userMsgIndex !== -1) {
-        messages.value[userMsgIndex].id = data.user_message_id
+        // Stocker l'ID serveur sans modifier l'ID temporaire
+        messages.value[userMsgIndex] = {
+          ...messages.value[userMsgIndex],
+          server_message_id: data.user_message_id
+        }
       }
     }
     
@@ -648,7 +713,7 @@ export const useChatStore = defineStore('chat', () => {
     const fullContent = data.content || data.message || data.response || ''
     const sources = data.sources || []
     
-    // Trouver le message assistant
+    // Trouver le message assistant avec findIndex
     const msgIndex = messages.value.findIndex(m => m.id === assistantMessage.id)
     if (msgIndex === -1) return
     
@@ -660,19 +725,25 @@ export const useChatStore = defineStore('chat', () => {
       if (abortController?.signal.aborted) break
       
       const chunk = fullContent.substring(0, i + chunkSize)
-      messages.value[msgIndex].content = chunk
+      
+      // CORRECTION : Forcer la réactivité Vue
+      messages.value[msgIndex] = {
+        ...messages.value[msgIndex],
+        content: chunk
+      }
       streamingContent.value = chunk
       
       await new Promise(resolve => setTimeout(resolve, baseDelay))
     }
     
     // S'assurer que tout le contenu est affiché
-    messages.value[msgIndex].content = fullContent
     streamingContent.value = fullContent
     
-    // Ajouter les sources et métadonnées
-    Object.assign(messages.value[msgIndex], {
-      id: data.message_id || data.id || assistantMessage.id,
+    // Ajouter les sources et métadonnées avec réactivité forcée
+    messages.value[msgIndex] = {
+      ...messages.value[msgIndex],
+      content: fullContent,
+      server_message_id: data.message_id || data.id,
       sources: sources,
       token_count_input: data.token_count_input,
       token_count_output: data.token_count_output,
@@ -681,7 +752,7 @@ export const useChatStore = defineStore('chat', () => {
       cache_hit: data.cache_hit,
       response_time_seconds: data.response_time_seconds,
       model_used: data.model_used
-    })
+    }
     
     streamingMessageId.value = data.message_id || data.id
     streamingSources.value = sources
