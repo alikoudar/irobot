@@ -211,9 +211,11 @@ async function loadStats() {
     stats.value.totalConversations = chatStore.total || conversations.length
     
     // Compter les messages
-    stats.value.totalMessages = conversations.reduce((sum, c) => {
-      return sum + (c.message_count || 0)
-    }, 0)
+    stats.value.totalMessages = Math.floor(
+      conversations.reduce((sum, c) => {
+        return sum + (c.message_count || 0)
+      }, 0) / 2
+    )
     
     // Cette semaine (7 derniers jours)
     const weekAgo = new Date(now)

@@ -50,35 +50,34 @@
     </el-card>
 
     <!-- Statistiques -->
-    <el-row :gutter="16" class="stats-row">
-      <el-col :span="8">
-        <el-card shadow="hover">
-          <el-statistic title="Total catégories" :value="categoriesStore.total">
-            <template #prefix>
-              <el-icon style="color: #005CA9"><Folder /></el-icon>
-            </template>
-          </el-statistic>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="hover">
-          <el-statistic title="Avec documents" :value="categoriesWithDocs">
-            <template #prefix>
-              <el-icon style="color: #50C878"><Document /></el-icon>
-            </template>
-          </el-statistic>
-        </el-card>
-      </el-col>
-      <el-col :span="8">
-        <el-card shadow="hover">
-          <el-statistic title="Sans documents" :value="categoriesWithoutDocs">
-            <template #prefix>
-              <el-icon style="color: #999"><FolderOpened /></el-icon>
-            </template>
-          </el-statistic>
-        </el-card>
-      </el-col>
-    </el-row>
+    <el-row :gutter="20" style="margin-bottom: 20px;">
+  <el-col :xs="24" :sm="8">
+    <StatCard
+      title="Total catégories"
+      :value="categoriesStore.total"
+      :icon="Folder"
+      icon-color="#3498db"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="8">
+    <StatCard
+      title="Avec documents"
+      :value="categoriesWithDocs"
+      :icon="Document"
+      icon-color="#67C23A"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="8">
+    <StatCard
+      title="Sans documents"
+      :value="categoriesWithoutDocs"
+      :icon="FolderOpened"
+      icon-color="#F56C6C"
+    />
+  </el-col>
+</el-row>
 
     <!-- Table des catégories -->
     <el-card class="table-card" shadow="never">
@@ -199,6 +198,8 @@ import {
   Delete
 } from '@element-plus/icons-vue'
 import CategoryForm from '@/components/forms/CategoryForm.vue'
+import StatCard from '@/components/common/StatCard.vue'
+
 
 // Stores
 const categoriesStore = useCategoriesStore()

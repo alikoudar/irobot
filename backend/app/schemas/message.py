@@ -6,6 +6,7 @@ Définit les schemas de validation pour les messages
 des conversations du chatbot, incluant le tracking des tokens et coûts.
 
 Sprint 7 - Phase 2 : Schemas Messages
+CORRECTION Sprint 9 : Ajout import réel FeedbackResponse et model_rebuild()
 """
 
 from datetime import datetime
@@ -14,6 +15,7 @@ from uuid import UUID
 from enum import Enum
 
 from pydantic import BaseModel, Field, ConfigDict
+
 
 
 # =============================================================================
@@ -79,6 +81,13 @@ class MessageCreate(BaseModel):
         default=None,
         description="ID de la conversation (nouvelle conversation si non fourni)"
     )
+
+
+# ✅ CORRECTION : Import pour type hints (mypy/IDE)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.schemas.feedback import FeedbackResponse
 
 
 class MessageCreateInternal(BaseModel):
@@ -149,6 +158,12 @@ class MessageResponse(BaseModel):
         description="Temps de réponse en secondes"
     )
     created_at: datetime
+    
+    # ✅ CORRECTION Sprint 9 : Feedback utilisateur
+    feedback: Optional["FeedbackResponse"] = Field(
+        default=None,
+        description="Feedback utilisateur sur ce message (si existant)"
+    )
 
 
 class MessageListResponse(BaseModel):
@@ -294,3 +309,18 @@ class ConversationHistory(BaseModel):
         max_length=10,
         description="Derniers messages (max 10)"
     )
+
+
+# =============================================================================
+# RÉSOLUTION DES FORWARD REFERENCES - CRITIQUE !
+# =============================================================================
+
+# ✅ CORRECTION : Import réel après toutes les définitions
+# Ceci évite l'import circulaire tout en permettant à Pydantic
+# de résoudre la référence FeedbackResponse
+from app.schemas.feedback import FeedbackResponse
+
+# ✅ CORRECTION : Rebuild pour que Pydantic connaisse FeedbackResponse
+# Sans cela, model_validate() lèvera l'erreur:
+# "MessageResponse is not fully defined; you should define FeedbackResponse"
+MessageResponse.model_rebuild()

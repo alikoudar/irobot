@@ -1,7 +1,7 @@
 <template>
   <div
     class="message-bubble"
-    :class="[roleClass, { streaming: message.isStreaming }]"
+    :class="[roleClass]"
   >
     <!-- Avatar -->
     <div class="message-avatar">
@@ -32,46 +32,26 @@
           class="message-text"
           v-html="renderedContent"
         ></div>
-        
-        <!-- Indicateur de streaming -->
-        <span v-if="message.isStreaming" class="cursor-blink">▌</span>
       </div>
       
       <!-- Sources (uniquement pour l'assistant) -->
-    <SourcesList
-        v-if="!isUser && hasSources && !message.isStreaming"
+      <SourcesList
+        v-if="!isUser && hasSources"
         :sources="message.sources"
         class="message-sources"
-    />
+      />
       
-      <!-- Footer avec actions -->
-      <div class="message-footer" v-if="!isUser && !message.isStreaming">
-        <!-- Feedback -->
+      <!-- Footer avec feedback (SIMPLIFIÉ - Plus de gestion d'IDs temporaires) -->
+      <div class="message-footer" v-if="!isUser">
+        <!-- 
+          ✅ SIMPLIFIÉ : message.id est TOUJOURS un UUID réel
+          Plus besoin de vérifier server_message_id ou temp-
+        -->
         <FeedbackButtons
           :message-id="message.id"
           :current-feedback="message.feedback"
           @feedback="handleFeedback"
         />
-        
-        <!-- Actions -->
-        <div class="message-actions">
-          <el-tooltip content="Copier" placement="top">
-            <el-button
-              :icon="CopyDocument"
-              text
-              size="small"
-              @click="copyContent"
-            />
-          </el-tooltip>
-          <el-tooltip content="Régénérer" placement="top">
-            <el-button
-              :icon="RefreshRight"
-              text
-              size="small"
-              @click="$emit('regenerate', message.id)"
-            />
-          </el-tooltip>
-        </div>
       </div>
       
       <!-- Métadonnées (optionnel, pour debug/admin) -->
@@ -95,27 +75,17 @@
 
 <script setup>
 /**
- * MessageBubble.vue
+ * MessageBubble.vue - VERSION SIMPLIFIÉE
  * 
- * Bulle de message avec :
- * - Rendu Markdown AMÉLIORÉ (tableaux, code, listes)
- * - Affichage des sources
- * - Boutons de feedback
- * - Actions (copier, régénérer)
- * - Support des Enums en MAJUSCULE (USER, ASSISTANT)
+ * Plus de problème d'IDs temporaires !
+ * Le message.id est TOUJOURS un UUID réel du backend.
  * 
- * Sprint 8 - CORRECTIONS V2
- * - Texte BLANC sur fond bleu (utilisateur)
- * - Espacement corrigé
+ * Sprint 9 - Correction: Utilisation endpoint non-streaming
  */
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
-import {
-  ChatDotRound,
-  CopyDocument,
-  RefreshRight
-} from '@element-plus/icons-vue'
+import { ChatDotRound } from '@element-plus/icons-vue'
+import { renderMarkdown } from '@/utils/markdown'
 
 import SourcesList from './SourcesList.vue'
 import FeedbackButtons from './FeedbackButtons.vue'
@@ -135,7 +105,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['feedback', 'copy', 'regenerate'])
+const emit = defineEmits(['feedback'])
 
 // ============================================================================
 // STORE
@@ -148,7 +118,7 @@ const authStore = useAuthStore()
 // ============================================================================
 
 /**
- * Vérification du rôle - SUPPORTE MAJUSCULE ET MINUSCULE
+ * Vérification du rôle
  */
 const isUser = computed(() => {
   const role = props.message.role?.toUpperCase()
@@ -168,230 +138,54 @@ const userInitials = computed(() => {
   return `${user.prenom?.[0] || ''}${user.nom?.[0] || ''}`.toUpperCase()
 })
 
+/**
+ * Vérifier si le message a des sources
+ */
 const hasSources = computed(() => {
-  return props.message.sources?.length > 0
+  return Array.isArray(props.message.sources) && props.message.sources.length > 0
 })
 
 /**
- * Contenu rendu avec Markdown AMÉLIORÉ - ESPACEMENT CORRIGÉ
+ * Rendu du contenu Markdown avec markdown-it
  */
 const renderedContent = computed(() => {
-  let content = props.message.content || ''
-  
-  // Échapper le HTML
-  content = escapeHtml(content)
-  
-  // Convertir le Markdown
-  content = parseMarkdown(content)
-  
-  return content
+  if (!props.message.content) return ''
+  return renderMarkdown(props.message.content)
 })
 
-// ============================================================================
-// METHODS
-// ============================================================================
-
 /**
- * Échapper le HTML
+ * Formater l'horodatage
  */
-function escapeHtml(text) {
-  const map = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  }
-  return text.replace(/[&<>"']/g, m => map[m])
-}
-
-/**
- * Parser le Markdown - VERSION CORRIGÉE sans espaces excessifs
- */
-function parseMarkdown(text) {
-  // 1. Blocs de code (avant tout le reste)
-  text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-    const language = lang || 'text'
-    return `<pre class="code-block"><code class="language-${language}">${code.trim()}</code></pre>`
-  })
+function formatTime(timestamp) {
+  if (!timestamp) return ''
   
-  // 2. Tableaux Markdown
-  text = parseMarkdownTables(text)
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diff = now - date
   
-  // 3. Code inline (après les blocs)
-  text = text.replace(/`([^`]+)`/g, '<code class="code-inline">$1</code>')
-  
-  // 4. Gras
-  text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  
-  // 5. Italique
-  text = text.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
-  
-  // 6. Citations [Document X]
-  text = text.replace(/\[Document (\d+(?:,\s*\d+)*)\]/g, '<span class="source-ref">[Document $1]</span>')
-  
-  // 7. Liens
-  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-  
-  // 8. Titres
-  text = text.replace(/^####\s+(.+)$/gm, '<h5 class="md-h5">$1</h5>')
-  text = text.replace(/^###\s+(.+)$/gm, '<h4 class="md-h4">$1</h4>')
-  text = text.replace(/^##\s+(.+)$/gm, '<h3 class="md-h3">$1</h3>')
-  text = text.replace(/^#\s+(.+)$/gm, '<h2 class="md-h2">$1</h2>')
-  
-  // 9. Ligne horizontale
-  text = text.replace(/^---+$/gm, '<hr class="md-hr">')
-  
-  // 10. Listes - CORRIGÉ pour éviter espaces excessifs
-  text = parseListsCompact(text)
-  
-  // 11. Paragraphes - CORRIGÉ pour éviter <br> multiples
-  text = formatParagraphs(text)
-  
-  return text
-}
-
-/**
- * Parser les tableaux Markdown
- */
-function parseMarkdownTables(text) {
-  const tableRegex = /(?:^|\n)(\|[^\n]+\|)\n(\|[-:\s|]+\|)\n((?:\|[^\n]+\|\n?)+)/g
-  
-  return text.replace(tableRegex, (match, headerRow, separator, bodyRows) => {
-    const alignments = separator.split('|').filter(c => c.trim()).map(cell => {
-      const trimmed = cell.trim()
-      if (trimmed.startsWith(':') && trimmed.endsWith(':')) return 'center'
-      if (trimmed.endsWith(':')) return 'right'
-      return 'left'
-    })
-    
-    const headers = headerRow.split('|').filter(c => c.trim()).map(c => c.trim())
-    const rows = bodyRows.trim().split('\n').map(row => 
-      row.split('|').filter(c => c.trim()).map(c => c.trim())
-    )
-    
-    let html = '<div class="table-wrapper"><table class="md-table">'
-    html += '<thead><tr>'
-    headers.forEach((cell, i) => {
-      const align = alignments[i] || 'left'
-      html += `<th style="text-align:${align}">${cell}</th>`
-    })
-    html += '</tr></thead><tbody>'
-    rows.forEach(row => {
-      html += '<tr>'
-      row.forEach((cell, i) => {
-        const align = alignments[i] || 'left'
-        html += `<td style="text-align:${align}">${cell}</td>`
-      })
-      html += '</tr>'
-    })
-    html += '</tbody></table></div>'
-    
-    return '\n' + html + '\n'
-  })
-}
-
-/**
- * Parser les listes de manière compacte
- */
-function parseListsCompact(text) {
-  const lines = text.split('\n')
-  let result = []
-  let inList = false
-  let listType = null
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const trimmed = line.trim()
-    
-    // Détecter les éléments de liste
-    const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/)
-    const numberMatch = trimmed.match(/^(\d+)\.\s+(.+)$/)
-    
-    if (bulletMatch) {
-      if (!inList || listType !== 'ul') {
-        if (inList) result.push(listType === 'ul' ? '</ul>' : '</ol>')
-        result.push('<ul class="md-list">')
-        inList = true
-        listType = 'ul'
-      }
-      result.push(`<li>${bulletMatch[1]}</li>`)
-    } else if (numberMatch) {
-      if (!inList || listType !== 'ol') {
-        if (inList) result.push(listType === 'ul' ? '</ul>' : '</ol>')
-        result.push('<ol class="md-list">')
-        inList = true
-        listType = 'ol'
-      }
-      result.push(`<li>${numberMatch[2]}</li>`)
-    } else {
-      if (inList) {
-        result.push(listType === 'ul' ? '</ul>' : '</ol>')
-        inList = false
-        listType = null
-      }
-      result.push(line)
-    }
+  // Moins d'une minute
+  if (diff < 60000) {
+    return 'À l\'instant'
   }
   
-  if (inList) {
-    result.push(listType === 'ul' ? '</ul>' : '</ol>')
+  // Moins d'une heure
+  if (diff < 3600000) {
+    const minutes = Math.floor(diff / 60000)
+    return `Il y a ${minutes} min`
   }
   
-  return result.join('\n')
-}
-
-/**
- * Formater les paragraphes sans espaces excessifs
- */
-function formatParagraphs(text) {
-  // Séparer par double saut de ligne pour les paragraphes
-  const blocks = text.split(/\n\n+/)
+  // Aujourd'hui
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  }
   
-  return blocks.map(block => {
-    const trimmed = block.trim()
-    if (!trimmed) return ''
-    
-    // Ne pas envelopper les éléments de bloc
-    if (trimmed.startsWith('<h') || 
-        trimmed.startsWith('<ul') || 
-        trimmed.startsWith('<ol') || 
-        trimmed.startsWith('<pre') || 
-        trimmed.startsWith('<table') || 
-        trimmed.startsWith('<div') ||
-        trimmed.startsWith('<hr')) {
-      return trimmed
-    }
-    
-    // Convertir les sauts de ligne simples en <br> seulement si nécessaire
-    const withBreaks = trimmed.replace(/\n/g, '<br>')
-    return `<p>${withBreaks}</p>`
-  }).filter(b => b).join('')
-}
-
-/**
- * Formater l'heure
- */
-function formatTime(dateString) {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleTimeString('fr-FR', {
+  // Autre jour
+  return date.toLocaleString('fr-FR', { 
+    day: 'numeric',
+    month: 'short',
     hour: '2-digit',
     minute: '2-digit'
   })
-}
-
-/**
- * Copier le contenu
- */
-async function copyContent() {
-  try {
-    await navigator.clipboard.writeText(props.message.content)
-    ElMessage.success('Contenu copié !')
-    emit('copy', props.message.content)
-  } catch (err) {
-    ElMessage.error('Impossible de copier')
-  }
 }
 
 /**
@@ -409,7 +203,7 @@ function handleFeedback(data) {
   padding: 16px 0;
   
   // =========================================================================
-  // MESSAGES UTILISATEUR - Bulle bleue à droite, TEXTE BLANC
+  // MESSAGES UTILISATEUR - Bulle bleue à droite
   // =========================================================================
   &.user {
     flex-direction: row-reverse;
@@ -424,14 +218,13 @@ function handleFeedback(data) {
     
     .message-body {
       background: linear-gradient(135deg, #005ca9 0%, #004a8a 100%);
-      color: #ffffff !important; // FORCE LE BLANC
+      color: #ffffff !important;
       border-radius: 20px 20px 4px 20px;
       box-shadow: 0 2px 8px rgba(0, 92, 169, 0.25);
       
       .message-text {
-        color: #ffffff !important; // TEXTE BLANC
+        color: #ffffff !important;
         
-        // Tous les éléments enfants en blanc
         :deep(*) {
           color: #ffffff !important;
         }
@@ -441,16 +234,8 @@ function handleFeedback(data) {
           text-decoration: underline;
         }
         
-        :deep(.code-inline) {
+        :deep(code:not(.hljs)) {
           background: rgba(255, 255, 255, 0.2);
-          color: #ffffff !important;
-        }
-        
-        :deep(strong) {
-          color: #ffffff !important;
-        }
-        
-        :deep(em) {
           color: #ffffff !important;
         }
       }
@@ -493,12 +278,6 @@ function handleFeedback(data) {
       box-shadow: 0 2px 8px rgba(0, 92, 169, 0.3);
     }
   }
-  
-  &.streaming {
-    .message-body {
-      min-height: 50px;
-    }
-  }
 }
 
 .message-avatar {
@@ -538,7 +317,7 @@ function handleFeedback(data) {
     line-height: 1.6;
     word-break: break-word;
     
-    // Paragraphes - ESPACEMENT RÉDUIT
+    // Paragraphes
     :deep(p) {
       margin: 0 0 8px;
       
@@ -547,97 +326,102 @@ function handleFeedback(data) {
       }
     }
     
-    // Titres
-    :deep(.md-h2) {
-      font-size: 17px;
-      font-weight: 700;
-      margin: 14px 0 8px;
-      color: #111827;
-      
-      &:first-child {
-        margin-top: 0;
-      }
-    }
-    
-    :deep(.md-h3) {
-      font-size: 15px;
-      font-weight: 600;
-      margin: 12px 0 6px;
-      color: #1f2937;
-      
-      &:first-child {
-        margin-top: 0;
-      }
-    }
-    
-    :deep(.md-h4), :deep(.md-h5) {
-      font-size: 14px;
-      font-weight: 600;
-      margin: 10px 0 4px;
-      color: #374151;
-      
-      &:first-child {
-        margin-top: 0;
-      }
-    }
-    
-    // Listes - COMPACTES
-    :deep(.md-list) {
-      margin: 6px 0;
-      padding-left: 20px;
+    // Listes
+    :deep(ul),
+    :deep(ol) {
+      margin: 4px 0;
+      padding-left: 24px;
       
       li {
-        margin: 2px 0;
-        line-height: 1.5;
-        
-        &::marker {
-          color: #005ca9;
-        }
+        margin: 1px 0;
       }
+    }
+    
+    :deep(ol) {
+      list-style-type: decimal;
+    }
+    
+    // Titres
+    :deep(h2) {
+      margin: 12px 0 6px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    
+    :deep(h3) {
+      margin: 10px 0 5px;
+      font-size: 16px;
+      font-weight: 600;
     }
     
     // Code inline
-    :deep(.code-inline) {
-      background: #f3f4f6;
+    :deep(code:not(.hljs)) {
+      background: #f1f5f9;
       padding: 2px 6px;
       border-radius: 4px;
-      font-family: 'Consolas', 'Monaco', monospace;
+      font-family: 'Courier New', monospace;
       font-size: 13px;
-      color: #dc2626;
+      color: #be123c;
     }
     
-    // Blocs de code
-    :deep(.code-block) {
-      background: #1e1e1e;
-      border-radius: 8px;
-      margin: 10px 0;
-      padding: 12px 14px;
-      overflow-x: auto;
-      
-      code {
-        font-family: 'Consolas', 'Monaco', monospace;
-        font-size: 13px;
-        line-height: 1.5;
-        color: #e5e7eb;
-      }
-    }
+    // Blocs de code avec highlight.js
+    :deep(pre.hljs) {
+  background: #1e293b;
+  color: #ffffff; // ← TOUT EN BLANC PAR DÉFAUT
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 12px 0;
+  
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    background: transparent;
+    padding: 0;
+  }
+  
+  // UNIQUEMENT ces éléments en jaune
+  .hljs-keyword,
+  .hljs-type,
+  .hljs-string,
+  .hljs-built_in {
+    color: #fcd34d !important; // Jaune
+  }
+  
+  // Mots-clés en gras
+  .hljs-keyword {
+    font-weight: 600;
+  }
+  
+  // Forcer TOUT LE RESTE en blanc
+  * {
+    color: #ffffff !important;
+  }
+  
+  // Puis réappliquer le jaune (priorité plus haute)
+  .hljs-keyword,
+  .hljs-type,
+  .hljs-string,
+  .hljs-built_in {
+    color: #fcd34d !important;
+  }
+}
     
     // Tableaux
-    :deep(.table-wrapper) {
-      overflow-x: auto;
-      margin: 10px 0;
-      border-radius: 6px;
-      border: 1px solid #e5e7eb;
-    }
-    
-    :deep(.md-table) {
-      width: 100%;
+    :deep(table) {
       border-collapse: collapse;
-      font-size: 13px;
+      width: 100%;
+      margin: 12px 0;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
       
       th, td {
-        padding: 8px 12px;
-        border-bottom: 1px solid #e5e7eb;
+        border: 1px solid #e5e7eb;
+        padding: 10px 14px;
+        text-align: left;
       }
       
       th {
@@ -646,58 +430,35 @@ function handleFeedback(data) {
         color: #374151;
       }
       
-      tbody tr:last-child td {
-        border-bottom: none;
+      tr:hover {
+        background: #f9fafb;
       }
     }
     
-    // Ligne horizontale
-    :deep(.md-hr) {
-      border: none;
-      height: 1px;
-      background: #e5e7eb;
+    // Citations
+    :deep(blockquote) {
+      border-left: 4px solid #005ca9;
+      padding-left: 16px;
       margin: 12px 0;
-    }
-    
-    // Références aux sources
-    :deep(.source-ref) {
-      color: #005ca9;
-      font-weight: 600;
+      color: #6b7280;
       font-style: italic;
+      background: #f9fafb;
+      padding: 12px 16px;
+      border-radius: 4px;
     }
     
     // Liens
     :deep(a) {
-      color: #005ca9;
+      color: #0066cc;
       text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s;
       
       &:hover {
-        text-decoration: underline;
+        border-bottom-color: #0066cc;
       }
     }
-    
-    // Gras
-    :deep(strong) {
-      font-weight: 600;
-      color: #111827;
-    }
-    
-    // Supprimer les <br> multiples
-    :deep(br + br) {
-      display: none;
-    }
   }
-  
-  .cursor-blink {
-    animation: blink 1s infinite;
-    color: #005ca9;
-    font-size: 16px;
-  }
-}
-
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
 }
 
 .message-sources {
@@ -707,37 +468,16 @@ function handleFeedback(data) {
 .message-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #f3f4f6;
-}
-
-.message-actions {
-  display: flex;
-  gap: 4px;
-  
-  .el-button {
-    color: #9ca3af;
-    
-    &:hover {
-      color: #005ca9;
-    }
-  }
+  margin-top: 8px;
+  padding-top: 8px;
 }
 
 .message-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 8px;
   font-size: 11px;
   color: #9ca3af;
-}
-
-@media (max-width: 768px) {
-  .message-content {
-    max-width: 90%;
-  }
 }
 </style>

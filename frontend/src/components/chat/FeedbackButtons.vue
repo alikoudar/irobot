@@ -4,30 +4,36 @@
     <el-tooltip content="Réponse utile" placement="top">
       <el-button
         class="feedback-btn"
-        :class="{ active: currentRating === 'thumbs_up' }"
-        :icon="Good"
+        :class="{ active: currentRating === 'THUMBS_UP' }"
         text
         size="small"
-        @click="handleFeedback('thumbs_up')"
-      />
+        @click="handleFeedback('THUMBS_UP')"
+      >
+        <el-icon :size="16">
+          <component :is="ThumbsUpIcon" />
+        </el-icon>
+      </el-button>
     </el-tooltip>
     
     <!-- Thumbs down -->
     <el-tooltip content="Réponse à améliorer" placement="top">
       <el-button
         class="feedback-btn"
-        :class="{ active: currentRating === 'thumbs_down' }"
-        :icon="Bad"
+        :class="{ active: currentRating === 'THUMBS_DOWN' }"
         text
         size="small"
-        @click="handleFeedback('thumbs_down')"
-      />
+        @click="handleFeedback('THUMBS_DOWN')"
+      >
+        <el-icon :size="16">
+          <component :is="ThumbsDownIcon" />
+        </el-icon>
+      </el-button>
     </el-tooltip>
     
     <!-- Indicateur de feedback existant -->
     <Transition name="fade">
       <span v-if="currentRating" class="feedback-indicator">
-        <el-icon v-if="currentRating === 'thumbs_up'" color="#10b981"><CircleCheck /></el-icon>
+        <el-icon v-if="currentRating === 'THUMBS_UP'" color="#10b981"><CircleCheck /></el-icon>
         <el-icon v-else color="#ef4444"><WarningFilled /></el-icon>
         <span class="feedback-text">Merci !</span>
       </span>
@@ -82,32 +88,62 @@
 
 <script setup>
 /**
- * FeedbackButtons.vue
+ * FeedbackButtons.vue - VERSION CORRIGÉE
  * 
  * Boutons de feedback (thumbs up/down) avec :
  * - Feedback positif direct
  * - Feedback négatif avec modal de commentaire
  * - Indicateur visuel du feedback actuel
  * 
+ * CORRECTION : Utilisation de composants Vue fonctionnels au lieu de template strings
+ * 
  * Sprint 8 - Phase 2 : Composants Chat
+ * Correction : 27 novembre 2025
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, h } from 'vue'
 import {
   CircleCheck,
   WarningFilled
 } from '@element-plus/icons-vue'
 
-// Icônes personnalisées pour thumbs
-const Good = {
-  template: `<svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M7.5 22h-3A1.5 1.5 0 0 1 3 20.5v-9A1.5 1.5 0 0 1 4.5 10h3a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5ZM21 10h-4.5a.5.5 0 0 1-.5-.5V6a3 3 0 0 0-3-3h-.5a.5.5 0 0 0-.45.28l-2.8 5.6a.5.5 0 0 0-.05.22v11a.5.5 0 0 0 .5.5h8.3a2 2 0 0 0 1.97-1.67l1.5-9A2 2 0 0 0 21 10Z"/>
-  </svg>`
+// ============================================================================
+// ICÔNES THUMBS (Composants fonctionnels Vue)
+// ============================================================================
+
+/**
+ * Icône Thumbs Up (composant fonctionnel)
+ */
+const ThumbsUpIcon = {
+  name: 'ThumbsUp',
+  render() {
+    return h('svg', {
+      viewBox: '0 0 24 24',
+      fill: 'currentColor',
+      xmlns: 'http://www.w3.org/2000/svg'
+    }, [
+      h('path', {
+        d: 'M7.5 22h-3A1.5 1.5 0 0 1 3 20.5v-9A1.5 1.5 0 0 1 4.5 10h3a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-.5.5ZM21 10h-4.5a.5.5 0 0 1-.5-.5V6a3 3 0 0 0-3-3h-.5a.5.5 0 0 0-.45.28l-2.8 5.6a.5.5 0 0 0-.05.22v11a.5.5 0 0 0 .5.5h8.3a2 2 0 0 0 1.97-1.67l1.5-9A2 2 0 0 0 21 10Z'
+      })
+    ])
+  }
 }
 
-const Bad = {
-  template: `<svg viewBox="0 0 24 24" fill="currentColor">
-    <path d="M16.5 2h3A1.5 1.5 0 0 1 21 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5ZM3 14h4.5a.5.5 0 0 1 .5.5V18a3 3 0 0 0 3 3h.5a.5.5 0 0 0 .45-.28l2.8-5.6a.5.5 0 0 0 .05-.22v-11a.5.5 0 0 0-.5-.5H6.5a2 2 0 0 0-1.97 1.67l-1.5 9A2 2 0 0 0 3 14Z"/>
-  </svg>`
+/**
+ * Icône Thumbs Down (composant fonctionnel)
+ */
+const ThumbsDownIcon = {
+  name: 'ThumbsDown',
+  render() {
+    return h('svg', {
+      viewBox: '0 0 24 24',
+      fill: 'currentColor',
+      xmlns: 'http://www.w3.org/2000/svg'
+    }, [
+      h('path', {
+        d: 'M16.5 2h3A1.5 1.5 0 0 1 21 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5ZM3 14h4.5a.5.5 0 0 1 .5.5V18a3 3 0 0 0 3 3h.5a.5.5 0 0 0 .45-.28l2.8-5.6a.5.5 0 0 0 .05-.22v-11a.5.5 0 0 0-.5-.5H6.5a2 2 0 0 0-1.97 1.67l-1.5 9A2 2 0 0 0 3 14Z'
+      })
+    ])
+  }
 }
 
 // ============================================================================
@@ -150,7 +186,14 @@ const quickOptions = [
 // ============================================================================
 
 const currentRating = computed(() => {
-  return props.currentFeedback?.rating || null
+  if (!props.currentFeedback) return null
+  
+  // Normaliser le rating en majuscules avec underscore
+  const rating = props.currentFeedback.rating
+  if (!rating) return null
+  
+  // Gérer différents formats : "thumbs_up", "THUMBS_UP", "thumbs-up"
+  return rating.toUpperCase().replace(/-/g, '_')
 })
 
 // ============================================================================
@@ -161,6 +204,8 @@ const currentRating = computed(() => {
  * Gérer le clic sur un bouton de feedback
  */
 function handleFeedback(rating) {
+  console.log('🔘 Feedback clicked:', { rating, messageId: props.messageId })
+  
   // Si même feedback, on le retire
   if (currentRating.value === rating) {
     emit('feedback', {
@@ -172,7 +217,7 @@ function handleFeedback(rating) {
   }
   
   // Feedback positif : envoi direct
-  if (rating === 'thumbs_up') {
+  if (rating === 'THUMBS_UP') {
     emit('feedback', {
       messageId: props.messageId,
       rating,
@@ -247,9 +292,10 @@ function submitFeedback() {
 .feedback-btn {
   width: 32px;
   height: 32px;
-  padding: 0;
+  padding: 4px;
   color: var(--text-tertiary);
   border-radius: 6px;
+  transition: all 0.2s;
   
   &:hover {
     color: var(--text-secondary);
@@ -257,20 +303,25 @@ function submitFeedback() {
   }
   
   &.active {
-    &:first-child {
+    // Thumbs up
+    &:nth-of-type(1) {
       color: #10b981;
       background: rgba(16, 185, 129, 0.1);
+      
+      &:hover {
+        background: rgba(16, 185, 129, 0.15);
+      }
     }
     
-    &:nth-child(2) {
+    // Thumbs down
+    &:nth-of-type(2) {
       color: #ef4444;
       background: rgba(239, 68, 68, 0.1);
+      
+      &:hover {
+        background: rgba(239, 68, 68, 0.15);
+      }
     }
-  }
-  
-  :deep(svg) {
-    width: 16px;
-    height: 16px;
   }
 }
 
@@ -281,9 +332,25 @@ function submitFeedback() {
   margin-left: 8px;
   font-size: 12px;
   color: var(--text-secondary);
+  animation: fadeIn 0.3s ease;
   
   .el-icon {
     font-size: 14px;
+  }
+  
+  .feedback-text {
+    font-weight: 500;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -308,6 +375,13 @@ function submitFeedback() {
       background: var(--bg-color);
       border: 1px solid var(--border-color);
       color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s;
+      
+      &:hover {
+        border-color: var(--primary-color);
+        color: var(--primary-color);
+      }
       
       &.is-checked {
         background: var(--primary-color);

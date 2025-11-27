@@ -52,7 +52,7 @@
           <!-- Historique - Tous les utilisateurs -->
           <el-menu-item index="/history">
             <el-icon><Clock /></el-icon>
-            <template #title>Historique</template>
+            <template #title>Mes Conversations</template>
           </el-menu-item>
 
           <!-- Mes Feedbacks - Tous les utilisateurs -->
@@ -108,6 +108,10 @@
             <el-menu-item index="/admin/stats">
               <el-icon><TrendCharts /></el-icon>
               <template #title>Statistiques</template>
+            </el-menu-item>
+            <el-menu-item index="/admin/feedbacks">
+              <el-icon><ChatLineSquare /></el-icon>
+              <template #title>Feedbacks</template>
             </el-menu-item>
             <el-menu-item index="/admin/logs">
               <el-icon><DocumentCopy /></el-icon>
@@ -286,21 +290,21 @@ const notifications = ref([
     id: 1,
     title: 'Nouveau document disponible',
     time: 'Il y a 5 minutes',
-    icon: InfoFilled,
+    icon: markRaw(InfoFilled),
     color: '#3b82f6'
   },
   {
     id: 2,
     title: 'Mise à jour système programmée',
     time: 'Il y a 1 heure',
-    icon: WarningFilled,
+    icon: markRaw(WarningFilled),
     color: '#f59e0b'
   },
   {
     id: 3,
     title: 'Sauvegarde complétée',
     time: 'Il y a 2 heures',
-    icon: InfoFilled,
+    icon: markRaw(InfoFilled),
     color: '#10b981'
   }
 ])

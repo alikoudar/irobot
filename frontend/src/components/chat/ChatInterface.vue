@@ -73,8 +73,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  // Nettoyer le store si nécessaire
-  chatStore.cancelStreaming()
+  // Pas besoin avec l'endpoint non-streaming
+  // if (chatStore.isSending) {
+  //   chatStore.cancelStreaming()
+  // }
 })
 
 // ============================================================================

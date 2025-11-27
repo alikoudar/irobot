@@ -4,7 +4,8 @@ from app.api.v1.endpoints import (auth,
                                   users, 
                                   categories, 
                                   documents,
-                                  chat)
+                                  chat,
+                                  feedbacks)
 
 # Créer le router principal v1
 api_router = APIRouter()
@@ -35,4 +36,9 @@ api_router.include_router(
 api_router.include_router(
     chat.router,
     tags=["Chat"]
+)
+
+api_router.include_router(
+    feedbacks.router,
+    tags=["Feedbacks"]
 )

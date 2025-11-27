@@ -19,44 +19,43 @@
     </div>
 
     <!-- Stats Cards -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-icon total-icon">
-          <el-icon :size="24"><Document /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>Total documents</p>
-          <h3>{{ documentsStore.total }}</h3>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon pending-icon">
-          <el-icon :size="24"><Clock /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>En traitement</p>
-          <h3>{{ documentsStore.pendingDocuments.length }}</h3>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon success-icon">
-          <el-icon :size="24"><CircleCheck /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>Terminés</p>
-          <h3>{{ documentsStore.completedDocuments.length }}</h3>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon error-icon">
-          <el-icon :size="24"><CircleClose /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>En erreur</p>
-          <h3>{{ documentsStore.failedDocuments.length }}</h3>
-        </div>
-      </div>
-    </div>
+    <el-row :gutter="20" style="margin-bottom: 20px;">
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="Total documents"
+      :value="documentsStore.total"
+      :icon="Document"
+      icon-color="#3498db"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="En traitement"
+      :value="documentsStore.pendingDocuments.length"
+      :icon="Loading"
+      icon-color="#E6A23C"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="Terminés"
+      :value="documentsStore.completedDocuments.length"
+      :icon="CircleCheck"
+      icon-color="#67C23A"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="En erreur"
+      :value="documentsStore.failedDocuments.length"
+      :icon="CircleClose"
+      icon-color="#F56C6C"
+    />
+  </el-col>
+</el-row>
 
     <!-- Filtres -->
     <div class="filters-bar">
@@ -351,6 +350,7 @@ import { useDocumentsStore } from '@/stores/documents'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import DocumentUpload from '@/components/documents/DocumentUpload.vue'
 import DocumentDetails from '@/components/documents/DocumentDetails.vue'
+import StatCard from '@/components/common/StatCard.vue'
 
 // Store
 const documentsStore = useDocumentsStore()
@@ -618,60 +618,6 @@ onUnmounted(() => {
   
   @media (max-width: 640px) {
     grid-template-columns: 1fr;
-  }
-}
-
-.stat-card {
-  background: white;
-  border-radius: 12px;
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-
-  .stat-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    &.total-icon {
-      background: rgba(59, 130, 246, 0.1);
-      color: #3b82f6;
-    }
-
-    &.pending-icon {
-      background: rgba(245, 158, 11, 0.1);
-      color: #f59e0b;
-    }
-
-    &.success-icon {
-      background: rgba(16, 185, 129, 0.1);
-      color: #10b981;
-    }
-
-    &.error-icon {
-      background: rgba(239, 68, 68, 0.1);
-      color: #ef4444;
-    }
-  }
-
-  .stat-content {
-    p {
-      margin: 0;
-      font-size: 14px;
-      color: var(--text-secondary, #6b7280);
-    }
-
-    h3 {
-      margin: 4px 0 0;
-      font-size: 24px;
-      font-weight: 700;
-      color: var(--text-primary, #1f2937);
-    }
   }
 }
 

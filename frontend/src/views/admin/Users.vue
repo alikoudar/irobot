@@ -32,46 +32,52 @@
     </div>
 
     <!-- Stats Cards -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-icon user-icon">
-          <el-icon :size="24"><User /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>Total utilisateurs</p>
-          <h3>{{ usersStore.total || 0 }}</h3>
-          <span class="stat-trend positive">+12%</span>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon active-icon">
-          <el-icon :size="24"><CircleCheck /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>Actifs</p>
-          <h3>{{ usersStore.stats?.active || 0 }}</h3>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon inactive-icon">
-          <el-icon :size="24"><CircleClose /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>Inactifs</p>
-          <h3>{{ usersStore.stats?.inactive || 0 }}</h3>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon connections-icon">
-          <el-icon :size="24"><Connection /></el-icon>
-        </div>
-        <div class="stat-content">
-          <p>Connexions (7j)</p>
-          <h3>{{ usersStore.stats?.recent_connections || 0 }}</h3>
-          <span class="stat-trend positive">+8%</span>
-        </div>
-      </div>
-    </div>
+    <!-- Stats Cards - Harmonisées avec animation -->
+<el-row :gutter="20" style="margin-bottom: 20px;">
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="Total utilisateurs"
+      :value="usersStore.total || 0"
+      :icon="User"
+      icon-color="#3498db"
+    >
+      <template #extra>
+        <div style="margin-top: 8px; color: #67C23A; font-size: 12px;">+12%</div>
+      </template>
+    </StatCard>
+  </el-col>
+  
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="Actifs"
+      :value="usersStore.stats?.active || 0"
+      :icon="CircleCheck"
+      icon-color="#67C23A"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="Inactifs"
+      :value="usersStore.stats?.inactive || 0"
+      :icon="CircleClose"
+      icon-color="#F56C6C"
+    />
+  </el-col>
+  
+  <el-col :xs="24" :sm="12" :md="6">
+    <StatCard
+      title="Connexions (7j)"
+      :value="usersStore.stats?.recent_connections || 0"
+      :icon="Connection"
+      icon-color="#E6A23C"
+    >
+      <template #extra>
+        <div style="margin-top: 8px; color: #67C23A; font-size: 12px;">+8%</div>
+      </template>
+    </StatCard>
+  </el-col>
+</el-row>
 
     <!-- Filters -->
     <div class="filters-section">
@@ -217,6 +223,7 @@ import {
 import { useUsersStore } from '@/stores/users'
 import UserForm from '@/components/forms/UserForm.vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
+import StatCard from '@/components/common/StatCard.vue'
 
 const usersStore = useUsersStore()
 const uploadRef = ref(null)
@@ -405,83 +412,6 @@ onMounted(async () => {
   .header-actions {
     display: flex;
     gap: 12px;
-  }
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-
-  .stat-card {
-    background: var(--card-bg, white);
-    border-radius: 12px;
-    padding: 20px;
-    display: flex;
-    gap: 16px;
-    border: 1px solid var(--border-color, #e5e7eb);
-    transition: all 0.3s;
-
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    }
-
-    .stat-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      &.user-icon {
-        background: #eff6ff;
-        color: #3b82f6;
-      }
-
-      &.active-icon {
-        background: #f0fdf4;
-        color: #10b981;
-      }
-
-      &.inactive-icon {
-        background: #fef2f2;
-        color: #ef4444;
-      }
-
-      &.connections-icon {
-        background: #fef3c7;
-        color: #f59e0b;
-      }
-    }
-
-    .stat-content {
-      flex: 1;
-
-      p {
-        font-size: 13px;
-        color: var(--text-secondary, #6b7280);
-        margin: 0 0 4px 0;
-      }
-
-      h3 {
-        font-size: 24px;
-        font-weight: 700;
-        margin: 0;
-        color: var(--text-primary, #1f2937);
-      }
-
-      .stat-trend {
-        font-size: 12px;
-        font-weight: 600;
-
-        &.positive {
-          color: #10b981;
-        }
-      }
-    }
   }
 }
 

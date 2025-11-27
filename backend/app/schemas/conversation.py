@@ -6,10 +6,11 @@ Définit les schemas de validation pour les opérations CRUD
 sur les conversations du chatbot.
 
 Sprint 7 - Phase 2 : Schemas Conversations
+Sprint 9 - Phase 1 : Ajout recherche avancée, export, auto-archivage
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -129,11 +130,12 @@ class ConversationSummary(BaseModel):
 class ConversationSummaryListResponse(BaseModel):
     """Schema de réponse pour une liste de résumés de conversations."""
     
-    conversations: List[ConversationSummary]  # ← Utilise ConversationSummary
+    conversations: List[ConversationSummary]
     total: int
     page: int
     page_size: int
     has_more: bool
+
 
 # =============================================================================
 # SCHEMAS POUR LE CHAT
@@ -219,4 +221,46 @@ class ConversationExportRequest(BaseModel):
     include_messages: bool = Field(
         default=True,
         description="Inclure les messages dans l'export"
+    )
+
+
+class ConversationExportData(BaseModel):
+    """Schema de réponse pour l'export de conversations."""
+    
+    data: Any = Field(
+        ...,
+        description="Données exportées (structure dépend du format)"
+    )
+    format: str = Field(
+        ...,
+        description="Format d'export (json ou csv)"
+    )
+    count: int = Field(
+        ...,
+        description="Nombre de conversations exportées"
+    )
+    exported_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="Date/heure de l'export"
+    )
+
+
+# =============================================================================
+# SCHEMAS SPRINT 9 - AUTO-ARCHIVAGE
+# =============================================================================
+
+class AutoArchiveResponse(BaseModel):
+    """Schema de réponse pour l'auto-archivage."""
+    
+    archived_count: int = Field(
+        ...,
+        description="Nombre de conversations archivées automatiquement"
+    )
+    threshold: int = Field(
+        default=50,
+        description="Seuil de conversations actives maintenues"
+    )
+    message: str = Field(
+        ...,
+        description="Message de confirmation"
     )

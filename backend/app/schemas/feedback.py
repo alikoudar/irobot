@@ -6,9 +6,10 @@ Définit les schemas de validation pour les feedbacks
 utilisateurs sur les messages du chatbot.
 
 Sprint 7 - Phase 2 : Schemas Feedbacks
+Sprint 9 - Phase 1 : Ajout tendances et statistiques avancées
 """
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List
 from uuid import UUID
 from enum import Enum
@@ -169,29 +170,107 @@ class FeedbackSearchParams(BaseModel):
 
 
 # =============================================================================
-# SCHEMAS DE STATISTIQUES
+# SCHEMAS DE STATISTIQUES - SPRINT 9 PHASE 1
 # =============================================================================
 
 class FeedbackStats(BaseModel):
-    """Statistiques des feedbacks."""
+    """Statistiques simplifiées des feedbacks."""
     
-    total_feedbacks: int = Field(..., description="Nombre total de feedbacks")
-    thumbs_up_count: int = Field(..., description="Nombre de thumbs up")
-    thumbs_down_count: int = Field(..., description="Nombre de thumbs down")
+    total_feedbacks: int = Field(
+        ..., 
+        description="Nombre total de feedbacks"
+    )
+    thumbs_up: int = Field(
+        ..., 
+        description="Nombre de feedbacks positifs"
+    )
+    thumbs_down: int = Field(
+        ..., 
+        description="Nombre de feedbacks négatifs"
+    )
+    with_comments: int = Field(
+        ...,
+        description="Nombre de feedbacks avec commentaire"
+    )
     satisfaction_rate: float = Field(
         ...,
         ge=0.0,
         le=100.0,
-        description="Taux de satisfaction en pourcentage"
+        description="Taux de satisfaction (%)"
     )
-    feedbacks_with_comments: int = Field(
+    feedback_rate: float = Field(
         ...,
-        description="Nombre de feedbacks avec commentaire"
+        ge=0.0,
+        le=100.0,
+        description="Taux de feedback (feedbacks/messages assistant) en %"
+    )
+    total_messages: int = Field(
+        ...,
+        description="Nombre total de messages assistant"
     )
 
+
+class FeedbackTrend(BaseModel):
+    """Statistiques de feedback pour une journée."""
+    
+    trend_date: date = Field(
+        ...,
+        description="Date de la journée",
+        alias="date"
+    )
+    total: int = Field(
+        ...,
+        description="Nombre total de feedbacks ce jour"
+    )
+    thumbs_up: int = Field(
+        ...,
+        description="Nombre de feedbacks positifs"
+    )
+    thumbs_down: int = Field(
+        ...,
+        description="Nombre de feedbacks négatifs"
+    )
+    satisfaction_rate: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="Taux de satisfaction pour ce jour (%)"
+    )
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FeedbackTrendsResponse(BaseModel):
+    """Réponse avec les tendances sur plusieurs jours."""
+    
+    trends: List[FeedbackTrend] = Field(
+        ...,
+        description="Tendances quotidiennes"
+    )
+    period_days: int = Field(
+        ...,
+        description="Nombre de jours analysés"
+    )
+    period_start_date: date = Field(
+        ...,
+        description="Date de début de la période",
+        alias="start_date"
+    )
+    period_end_date: date = Field(
+        ...,
+        description="Date de fin de la période",
+        alias="end_date"
+    )
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+
+# =============================================================================
+# SCHEMAS LEGACY (COMPATIBILITÉ)
+# =============================================================================
 
 class FeedbackStatsByPeriod(BaseModel):
-    """Statistiques des feedbacks par période."""
+    """Statistiques des feedbacks par période (legacy)."""
     
     period: str = Field(..., description="Période (jour, semaine, mois)")
     date: datetime = Field(..., description="Date de début de la période")
@@ -202,7 +281,7 @@ class FeedbackStatsByPeriod(BaseModel):
 
 
 class FeedbackStatsResponse(BaseModel):
-    """Réponse complète des statistiques de feedbacks."""
+    """Réponse complète des statistiques de feedbacks (legacy)."""
     
     overall: FeedbackStats
     by_period: List[FeedbackStatsByPeriod] = Field(

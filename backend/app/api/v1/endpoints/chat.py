@@ -11,29 +11,43 @@ Ce module expose les endpoints pour :
 - POST /messages/{id}/feedback : Ajouter un feedback sur un message
 
 Sprint 7 - Phase 4 : Endpoints Chat
+Sprint 9 - Phase 1 : Recherche avancée, export, auto-archivage, stats feedbacks
 """
 
 import logging
 import json
+import csv
+import io
 from typing import Optional
 from uuid import UUID
+from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sse_starlette.sse import EventSourceResponse
+from sqlalchemy import and_, or_, func, cast, Integer
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, require_admin
 from app.models.user import User
+from app.models.conversation import Conversation
+from app.models.message import Message
+from app.models.feedback import Feedback
 from app.schemas.message import ChatRequest
 from app.schemas.conversation import (
     ConversationResponse,
     ConversationListResponse,
     ConversationUpdate,
     ConversationArchive,
-    ConversationSummaryListResponse
+    ConversationSummaryListResponse,
+    AutoArchiveResponse
 )
-from app.schemas.feedback import FeedbackCreate, FeedbackResponse
+from app.schemas.feedback import (
+    FeedbackCreate, 
+    FeedbackResponse,
+    FeedbackStats,
+    FeedbackTrend,
+    FeedbackTrendsResponse
+)
 from app.services.chat_service import get_chat_service
 
 # Configuration du logger
@@ -70,7 +84,7 @@ async def chat_stream(
         db: Session de base de données
     
     Returns:
-        EventSourceResponse avec les événements SSE
+        StreamingResponse avec les événements SSE
     """
     chat_service = get_chat_service()
     
@@ -86,19 +100,24 @@ async def chat_stream(
                 event_type = event.get("event", "message")
                 event_data = event.get("data", {})
                 
-                yield {
-                    "event": event_type,
-                    "data": json.dumps(event_data, default=str)
-                }
+                # Format SSE: chaque ligne doit commencer par "event:" ou "data:"
+                yield f"event: {event_type}\n"
+                yield f"data: {json.dumps(event_data, default=str)}\n\n"
         
         except Exception as e:
             logger.error(f"Erreur streaming: {e}")
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e), "code": "STREAM_ERROR"})
-            }
+            yield f"event: error\n"
+            yield f"data: {json.dumps({'error': str(e), 'code': 'STREAM_ERROR'})}\n\n"
     
-    return EventSourceResponse(event_generator())
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Désactiver le buffering Nginx
+        }
+    )
 
 
 @router.post("", status_code=status.HTTP_200_OK)
@@ -218,6 +237,225 @@ async def list_conversations(
         page=page,
         page_size=page_size,
         has_more=(page * page_size) < total
+    )
+
+
+@router.get("/conversations/search/advanced", response_model=ConversationListResponse)
+async def search_conversations_advanced(
+    search: Optional[str] = Query(default=None, description="Texte à rechercher dans titre et messages"),
+    start_date: Optional[datetime] = Query(default=None, description="Date de début (ISO format)"),
+    end_date: Optional[datetime] = Query(default=None, description="Date de fin (ISO format)"),
+    is_archived: Optional[bool] = Query(default=None, description="Filtrer par statut archivé"),
+    page: int = Query(default=1, ge=1, description="Numéro de page"),
+    page_size: int = Query(default=20, ge=1, le=100, description="Taille de la page"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> ConversationListResponse:
+    """
+    Recherche avancée dans les conversations.
+    
+    Permet de chercher par :
+    - Texte dans titre et contenu des messages
+    - Plage de dates
+    - Statut d'archivage
+    
+    Sprint 9 - Phase 1
+    """
+    skip = (page - 1) * page_size
+    
+    # Construction de la requête
+    query = db.query(Conversation).filter(Conversation.user_id == current_user.id)
+    
+    # Filtre de recherche textuelle
+    if search:
+        # Recherche dans titre ET messages
+        query = query.outerjoin(Message).filter(
+            or_(
+                Conversation.title.ilike(f"%{search}%"),
+                Message.content.ilike(f"%{search}%")
+            )
+        ).distinct()
+    
+    # Filtre par dates
+    if start_date:
+        query = query.filter(Conversation.created_at >= start_date)
+    if end_date:
+        # Inclure toute la journée
+        end_of_day = end_date.replace(hour=23, minute=59, second=59)
+        query = query.filter(Conversation.created_at <= end_of_day)
+    
+    # Filtre par archivage
+    if is_archived is not None:
+        query = query.filter(Conversation.is_archived == is_archived)
+    
+    # Compter le total
+    total = query.count()
+    
+    # Pagination et tri
+    conversations = query.order_by(Conversation.updated_at.desc()).offset(skip).limit(page_size).all()
+    
+    # Ajouter message_count
+    for conv in conversations:
+        conv.message_count = db.query(Message).filter(Message.conversation_id == conv.id).count()
+    
+    return ConversationListResponse(
+        conversations=[ConversationResponse.model_validate(c) for c in conversations],
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=(page * page_size) < total
+    )
+
+
+@router.get("/conversations/export")
+async def export_conversations(
+    format: str = Query(default="json", pattern="^(json|csv)$", description="Format d'export"),
+    start_date: Optional[datetime] = Query(default=None, description="Date de début"),
+    end_date: Optional[datetime] = Query(default=None, description="Date de fin"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Exporte les conversations de l'utilisateur.
+    
+    Formats supportés : JSON, CSV
+    Limite : 10000 conversations pour éviter timeout
+    
+    Sprint 9 - Phase 1
+    """
+    # Construction de la requête
+    query = db.query(Conversation).filter(Conversation.user_id == current_user.id)
+    
+    if start_date:
+        query = query.filter(Conversation.created_at >= start_date)
+    if end_date:
+        end_of_day = end_date.replace(hour=23, minute=59, second=59)
+        query = query.filter(Conversation.created_at <= end_of_day)
+    
+    # Limite de sécurité
+    conversations = query.order_by(Conversation.created_at.desc()).limit(10000).all()
+    
+    if format == "json":
+        # Export JSON avec messages
+        data = []
+        for conv in conversations:
+            messages = db.query(Message).filter(Message.conversation_id == conv.id).order_by(Message.created_at).all()
+            
+            data.append({
+                "id": str(conv.id),
+                "title": conv.title,
+                "created_at": conv.created_at.isoformat(),
+                "updated_at": conv.updated_at.isoformat(),
+                "is_archived": conv.is_archived,
+                "message_count": len(messages),
+                "messages": [
+                    {
+                        "id": str(msg.id),
+                        "role": msg.role,
+                        "content": msg.content,
+                        "created_at": msg.created_at.isoformat(),
+                        "token_count_input": msg.token_count_input,
+                        "token_count_output": msg.token_count_output,
+                        "cost_usd": float(msg.cost_usd) if msg.cost_usd else 0.0,
+                        "cost_xaf": float(msg.cost_xaf) if msg.cost_xaf else 0.0
+                    }
+                    for msg in messages
+                ]
+            })
+        
+        return {
+            "data": data,
+            "count": len(conversations),
+            "format": "json",
+            "exported_at": datetime.utcnow().isoformat()
+        }
+    
+    else:  # CSV
+        # Export CSV (un message par ligne)
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # En-têtes
+        writer.writerow([
+            "conversation_id", "conversation_title", "conversation_created_at",
+            "message_id", "message_role", "message_content", "message_created_at",
+            "tokens_input", "tokens_output", "cost_usd", "cost_xaf"
+        ])
+        
+        # Données
+        for conv in conversations:
+            messages = db.query(Message).filter(Message.conversation_id == conv.id).order_by(Message.created_at).all()
+            for msg in messages:
+                writer.writerow([
+                    str(conv.id),
+                    conv.title,
+                    conv.created_at.isoformat(),
+                    str(msg.id),
+                    msg.role,
+                    msg.content[:500],  # Tronquer le contenu
+                    msg.created_at.isoformat(),
+                    msg.token_count_input or 0,
+                    msg.token_count_output or 0,
+                    float(msg.cost_usd) if msg.cost_usd else 0.0,
+                    float(msg.cost_xaf) if msg.cost_xaf else 0.0
+                ])
+        
+        output.seek(0)
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=conversations_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+            }
+        )
+
+
+@router.post("/conversations/auto-archive", response_model=AutoArchiveResponse)
+async def auto_archive_conversations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> AutoArchiveResponse:
+    """
+    Archive automatiquement les anciennes conversations.
+    
+    Garde les 50 conversations les plus récentes actives,
+    archive toutes les autres.
+    
+    Sprint 9 - Phase 1
+    """
+    threshold = 50
+    
+    # Récupérer toutes les conversations actives
+    active_conversations = db.query(Conversation).filter(
+        and_(
+            Conversation.user_id == current_user.id,
+            Conversation.is_archived == False
+        )
+    ).order_by(Conversation.updated_at.desc()).all()
+    
+    # Si moins de threshold conversations, ne rien faire
+    if len(active_conversations) <= threshold:
+        return AutoArchiveResponse(
+            archived_count=0,
+            threshold=threshold,
+            message=f"Vous avez {len(active_conversations)} conversations actives. Aucune archivage nécessaire."
+        )
+    
+    # Archiver les conversations au-delà du threshold
+    conversations_to_archive = active_conversations[threshold:]
+    archived_count = 0
+    
+    for conv in conversations_to_archive:
+        conv.is_archived = True
+        conv.archived_at = datetime.utcnow()
+        archived_count += 1
+    
+    db.commit()
+    
+    return AutoArchiveResponse(
+        archived_count=archived_count,
+        threshold=threshold,
+        message=f"{archived_count} conversation(s) archivée(s) automatiquement. {threshold} conversations actives maintenues."
     )
 
 
@@ -354,9 +592,6 @@ async def update_conversation(
     Raises:
         HTTPException 404: Conversation non trouvée
     """
-    from app.models.conversation import Conversation
-    from sqlalchemy import and_
-    
     conversation = db.query(Conversation).filter(
         and_(
             Conversation.id == conversation_id,
@@ -377,7 +612,6 @@ async def update_conversation(
     if request.is_archived is not None:
         conversation.is_archived = request.is_archived
         if request.is_archived:
-            from datetime import datetime
             conversation.archived_at = datetime.utcnow()
         else:
             conversation.archived_at = None
@@ -460,9 +694,6 @@ async def get_feedback(
     Returns:
         Feedback si existant, null sinon
     """
-    from app.models.feedback import Feedback
-    from sqlalchemy import and_
-    
     feedback = db.query(Feedback).filter(
         and_(
             Feedback.message_id == message_id,
@@ -493,9 +724,6 @@ async def delete_feedback(
     Raises:
         HTTPException 404: Feedback non trouvé
     """
-    from app.models.feedback import Feedback
-    from sqlalchemy import and_
-    
     feedback = db.query(Feedback).filter(
         and_(
             Feedback.message_id == message_id,
@@ -513,3 +741,119 @@ async def delete_feedback(
     db.commit()
     
     return None
+
+
+@router.get("/feedbacks/statistics", response_model=FeedbackStats)
+async def get_feedback_statistics(
+    start_date: Optional[datetime] = Query(default=None, description="Date de début"),
+    end_date: Optional[datetime] = Query(default=None, description="Date de fin"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> FeedbackStats:
+    """
+    Récupère les statistiques de feedback de l'utilisateur.
+    
+    Sprint 9 - Phase 1
+    """
+    # Construction de la requête feedbacks
+    feedback_query = db.query(Feedback).filter(Feedback.user_id == current_user.id)
+    
+    if start_date:
+        feedback_query = feedback_query.filter(Feedback.created_at >= start_date)
+    if end_date:
+        end_of_day = end_date.replace(hour=23, minute=59, second=59)
+        feedback_query = feedback_query.filter(Feedback.created_at <= end_of_day)
+    
+    # Statistiques feedbacks
+    feedbacks = feedback_query.all()
+    total_feedbacks = len(feedbacks)
+    thumbs_up = sum(1 for f in feedbacks if f.rating == "THUMBS_UP")
+    thumbs_down = sum(1 for f in feedbacks if f.rating == "THUMBS_DOWN")
+    with_comments = sum(1 for f in feedbacks if f.comment)
+    
+    # Calcul taux de satisfaction
+    satisfaction_rate = (thumbs_up / total_feedbacks * 100) if total_feedbacks > 0 else 0.0
+    
+    # Nombre total de messages assistant
+    message_query = db.query(Message).join(Conversation).filter(
+        and_(
+            Conversation.user_id == current_user.id,
+            Message.role == "ASSISTANT"
+        )
+    )
+    
+    if start_date:
+        message_query = message_query.filter(Message.created_at >= start_date)
+    if end_date:
+        end_of_day = end_date.replace(hour=23, minute=59, second=59)
+        message_query = message_query.filter(Message.created_at <= end_of_day)
+    
+    total_messages = message_query.count()
+    
+    # Calcul taux de feedback
+    feedback_rate = (total_feedbacks / total_messages * 100) if total_messages > 0 else 0.0
+    
+    return FeedbackStats(
+        total_feedbacks=total_feedbacks,
+        thumbs_up=thumbs_up,
+        thumbs_down=thumbs_down,
+        with_comments=with_comments,
+        satisfaction_rate=round(satisfaction_rate, 2),
+        feedback_rate=round(feedback_rate, 2),
+        total_messages=total_messages
+    )
+
+
+@router.get("/feedbacks/trends", response_model=FeedbackTrendsResponse)
+async def get_feedback_trends(
+    days: int = Query(default=30, ge=1, le=365, description="Nombre de jours à analyser"),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+) -> FeedbackTrendsResponse:
+    """
+    Récupère les tendances de feedback sur N jours (admin seulement).
+    
+    Agrège les feedbacks par jour pour analyser l'évolution.
+    
+    Sprint 9 - Phase 1
+    """
+    # Calcul des dates
+    end_date = datetime.utcnow().date()
+    start_date = end_date - timedelta(days=days - 1)
+    
+    # Requête avec agrégation par jour
+    trends_data = db.query(
+        func.date(Feedback.created_at).label('date'),
+        func.count(Feedback.id).label('total'),
+        func.sum(cast(Feedback.rating == "THUMBS_UP", Integer)).label('thumbs_up'),
+        func.sum(cast(Feedback.rating == "THUMBS_DOWN", Integer)).label('thumbs_down')
+    ).filter(
+        func.date(Feedback.created_at) >= start_date
+    ).group_by(
+        func.date(Feedback.created_at)
+    ).order_by(
+        func.date(Feedback.created_at)
+    ).all()
+    
+    # Construire les tendances
+    trends = []
+    for row in trends_data:
+        total = row.total or 0
+        thumbs_up = row.thumbs_up or 0
+        thumbs_down = row.thumbs_down or 0
+        satisfaction_rate = (thumbs_up / total * 100) if total > 0 else 0.0
+        
+        trends.append(FeedbackTrend(
+            date=row.date,  # Pydantic utilise l'alias
+            total=total,
+            thumbs_up=thumbs_up,
+            thumbs_down=thumbs_down,
+            satisfaction_rate=round(satisfaction_rate, 2)
+        ))
+    
+    return FeedbackTrendsResponse(
+        trends=trends,
+        period_days=days,
+        start_date=start_date,
+        end_date=end_date
+    )

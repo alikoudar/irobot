@@ -1,44 +1,46 @@
 <template>
   <div class="chat-window">
-    <!-- Header de la conversation -->
+    <!-- Header -->
     <div class="chat-header" v-if="chatStore.currentConversation">
       <div class="header-info">
         <h3 class="conversation-title">
           {{ chatStore.currentConversation.title || 'Nouvelle conversation' }}
         </h3>
-        <span class="message-count" v-if="chatStore.messages.length">
-          {{ chatStore.messages.length }} messages
+        <span class="message-count">
+          {{ chatStore.messages.length }} message{{ chatStore.messages.length > 1 ? 's' : '' }}
         </span>
       </div>
+      
       <div class="header-actions">
-        <el-tooltip content="Partager" placement="bottom">
-          <el-button :icon="Share" text circle disabled />
-        </el-tooltip>
-        <el-tooltip content="Options" placement="bottom">
-          <el-dropdown trigger="click" @command="handleHeaderCommand">
-            <el-button :icon="MoreFilled" text circle />
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="rename" :icon="Edit">
-                  Renommer
-                </el-dropdown-item>
-                <el-dropdown-item command="export" :icon="Download">
-                  Exporter
-                </el-dropdown-item>
-                <el-dropdown-item command="delete" :icon="Delete" divided>
-                  <span style="color: var(--error-color)">Supprimer</span>
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </el-tooltip>
+        <el-dropdown trigger="click" @command="handleConversationAction">
+          <el-button :icon="MoreFilled" circle text />
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="rename" :icon="Edit">
+                Renommer
+              </el-dropdown-item>
+              <el-dropdown-item 
+                :command="chatStore.currentConversation.is_archived ? 'unarchive' : 'archive'"
+                :icon="chatStore.currentConversation.is_archived ? FolderOpened : Folder"
+              >
+                {{ chatStore.currentConversation.is_archived ? 'Désarchiver' : 'Archiver' }}
+              </el-dropdown-item>
+              <el-dropdown-item command="export" :icon="Download">
+                Exporter
+              </el-dropdown-item>
+              <el-dropdown-item command="delete" :icon="Delete" divided>
+                Supprimer
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
     
-    <!-- Zone des messages -->
-    <div class="messages-container" ref="messagesContainer">
+    <!-- Messages container -->
+    <div ref="messagesContainer" class="messages-container">
       <!-- État vide -->
-      <div v-if="!chatStore.messages.length && !chatStore.isStreaming" class="welcome-state">
+      <div v-if="chatStore.messages.length === 0 && !chatStore.isGenerating" class="welcome-state">
         <div class="welcome-icon">
           <el-icon :size="64"><ChatDotRound /></el-icon>
         </div>
@@ -71,20 +73,33 @@
             :key="message.id"
             :message="message"
             @feedback="handleFeedback"
-            @copy="handleCopy"
-            @regenerate="handleRegenerate"
           />
         </TransitionGroup>
         
-        <!-- Indicateur de streaming -->
-        <div v-if="chatStore.isStreaming" class="streaming-indicator">
-          <div class="typing-dots">
-            <span></span>
-            <span></span>
-            <span></span>
+        <!-- 
+          ✅ SIMPLIFIÉ : Un seul indicateur pendant la génération
+          Visible UNIQUEMENT pendant isGenerating
+        -->
+        <Transition name="fade">
+          <div v-if="chatStore.isGenerating" class="generating-bubble">
+            <div class="generating-avatar">
+              <el-icon :size="22"><ChatDotRound /></el-icon>
+            </div>
+            <div class="generating-content">
+              <div class="generating-header">
+                <span class="generating-label">IroBot</span>
+              </div>
+              <div class="generating-body">
+                <span class="generating-text">IroBot réfléchit</span>
+                <span class="generating-dots">
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                </span>
+              </div>
+            </div>
           </div>
-          <span class="typing-text">IroBot réfléchit...</span>
-        </div>
+        </Transition>
       </div>
       
       <!-- Scroll to bottom button -->
@@ -101,20 +116,6 @@
     
     <!-- Zone de saisie -->
     <div class="input-container">
-      <!-- Annuler le streaming -->
-      <Transition name="fade">
-        <el-button
-          v-if="chatStore.isStreaming"
-          class="cancel-btn"
-          type="danger"
-          plain
-          :icon="VideoPause"
-          @click="$emit('cancel')"
-        >
-          Arrêter la génération
-        </el-button>
-      </Transition>
-      
       <!-- Input -->
       <div class="input-wrapper">
         <el-input
@@ -124,7 +125,7 @@
           :rows="1"
           :autosize="{ minRows: 1, maxRows: 5 }"
           placeholder="Posez votre question..."
-          :disabled="chatStore.isStreaming"
+          :disabled="chatStore.isGenerating"
           @keydown.enter.exact.prevent="handleSend"
           @keydown.enter.shift.exact="handleNewLine"
         />
@@ -139,7 +140,7 @@
               :icon="Promotion"
               circle
               :disabled="!canSend"
-              :loading="chatStore.isSending && !chatStore.isStreaming"
+              :loading="chatStore.isGenerating"
               @click="handleSend"
             />
           </el-tooltip>
@@ -148,7 +149,7 @@
       
       <p class="input-hint">
         <el-icon><InfoFilled /></el-icon>
-        Appuyez sur Entrée pour envoyer, Maj+Entrée pour un saut de ligne
+        Appuyez sur Entrée pour envoyer, Maj+Entrée pour un retour à la ligne
       </p>
     </div>
   </div>
@@ -156,63 +157,62 @@
 
 <script setup>
 /**
- * ChatWindow.vue
+ * ChatWindow.vue - VERSION SIMPLIFIÉE
  * 
- * Fenêtre principale de chat avec :
- * - Zone de messages scrollable
- * - Input de saisie avec validation
- * - Indicateurs de streaming
+ * Plus de gestion SSE complexe !
+ * Simple indicateur pendant isGenerating.
  * 
- * Sprint 8 - Phase 2 : Composants Chat
+ * Sprint 9 - Correction: Utilisation endpoint non-streaming
  */
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ChatDotRound,
-  Promotion,
-  ArrowDown,
-  VideoPause,
   MoreFilled,
-  Share,
   Edit,
+  Folder,
+  FolderOpened,
   Download,
   Delete,
+  ArrowDown,
+  Promotion,
   InfoFilled
 } from '@element-plus/icons-vue'
 
 import MessageBubble from './MessageBubble.vue'
 
 // ============================================================================
-// EMITS
+// PROPS & EMITS
 // ============================================================================
 
-const emit = defineEmits(['send', 'cancel', 'feedback'])
+const props = defineProps({
+  conversationId: {
+    type: String,
+    default: null
+  }
+})
+
+const emit = defineEmits(['send', 'feedback'])
 
 // ============================================================================
-// STORE
+// STATE
 // ============================================================================
 
 const chatStore = useChatStore()
-
-// ============================================================================
-// REFS
-// ============================================================================
-
+const inputMessage = ref('')
 const messagesContainer = ref(null)
 const inputRef = ref(null)
-const inputMessage = ref('')
 const showScrollButton = ref(false)
 
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
+// Constantes
 const MAX_LENGTH = 10000
 const WARN_THRESHOLD = 9000
 
+// Suggestions
 const suggestions = [
-  'Quelle est la procédure pour ouvrir un compte ?',
+  'Comment obtenir un prêt à la BEAC ?',
+  'Quels sont les taux d\'intérêt actuels ?',
   'Quelles sont les conditions des lettres circulaires ?',
   'Comment fonctionne le système de paiement ?'
 ]
@@ -232,12 +232,11 @@ const isOverLimit = computed(() => {
 const canSend = computed(() => {
   return inputMessage.value.trim().length > 0 &&
          inputMessage.value.length <= MAX_LENGTH &&
-         !chatStore.isSending &&
-         !chatStore.isStreaming
+         !chatStore.isGenerating
 })
 
 const sendTooltip = computed(() => {
-  if (chatStore.isStreaming) return 'Génération en cours...'
+  if (chatStore.isGenerating) return 'Génération en cours...'
   if (isOverLimit.value) return 'Message trop long'
   if (!inputMessage.value.trim()) return 'Entrez un message'
   return 'Envoyer (Entrée)'
@@ -253,14 +252,6 @@ watch(() => chatStore.messages.length, async () => {
   scrollToBottom()
 })
 
-// Auto-scroll pendant le streaming
-watch(() => chatStore.streamingContent, async () => {
-  await nextTick()
-  if (isNearBottom()) {
-    scrollToBottom()
-  }
-})
-
 // Détecter le scroll pour afficher le bouton
 watch(() => messagesContainer.value, (container) => {
   if (container) {
@@ -272,9 +263,6 @@ watch(() => messagesContainer.value, (container) => {
 // METHODS
 // ============================================================================
 
-/**
- * Vérifier si on est proche du bas
- */
 function isNearBottom() {
   const container = messagesContainer.value
   if (!container) return true
@@ -283,16 +271,10 @@ function isNearBottom() {
   return container.scrollHeight - container.scrollTop - container.clientHeight < threshold
 }
 
-/**
- * Gérer le scroll
- */
 function handleScroll() {
   showScrollButton.value = !isNearBottom()
 }
 
-/**
- * Scroller vers le bas
- */
 function scrollToBottom() {
   const container = messagesContainer.value
   if (container) {
@@ -303,9 +285,6 @@ function scrollToBottom() {
   }
 }
 
-/**
- * Envoyer le message
- */
 async function handleSend() {
   if (!canSend.value) return
   
@@ -318,116 +297,86 @@ async function handleSend() {
   scrollToBottom()
 }
 
-/**
- * Nouvelle ligne (Maj+Entrée)
- */
 function handleNewLine(event) {
-  // Laisser le comportement par défaut
+  // Laisser le comportement par défaut (Maj+Entrée ajoute \n)
 }
 
-/**
- * Cliquer sur une suggestion
- */
 function handleSuggestionClick(suggestion) {
   inputMessage.value = suggestion
-  inputRef.value?.focus()
+  handleSend()
 }
 
-/**
- * Gérer le feedback
- */
 function handleFeedback(data) {
   emit('feedback', data)
 }
 
-/**
- * Copier un message
- */
-async function handleCopy(content) {
-  try {
-    await navigator.clipboard.writeText(content)
-    ElMessage.success('Copié dans le presse-papier')
-  } catch (error) {
-    ElMessage.error('Erreur lors de la copie')
-  }
-}
-
-/**
- * Régénérer la dernière réponse
- */
-async function handleRegenerate() {
-  // Trouver le dernier message utilisateur
-  const userMessages = chatStore.messages.filter(m => m.role === 'user')
-  const lastUserMessage = userMessages[userMessages.length - 1]
+async function handleConversationAction(command) {
+  const conversationId = chatStore.currentConversation?.id
   
-  if (lastUserMessage) {
-    emit('send', lastUserMessage.content)
-  }
-}
-
-/**
- * Commandes du header
- */
-async function handleHeaderCommand(command) {
-  const conversation = chatStore.currentConversation
-  if (!conversation) return
+  if (!conversationId) return
   
   switch (command) {
     case 'rename':
-      try {
-        const { value } = await ElMessageBox.prompt(
-          'Nouveau titre',
-          'Renommer la conversation',
-          {
-            inputValue: conversation.title,
-            confirmButtonText: 'Valider',
-            cancelButtonText: 'Annuler'
-          }
-        )
-        if (value) {
-          await chatStore.updateConversationTitle(conversation.id, value)
-        }
-      } catch {}
+      await handleRename(conversationId)
       break
-      
+    case 'archive':
+      await chatStore.archiveConversation(conversationId, true)
+      break
+    case 'unarchive':
+      await chatStore.archiveConversation(conversationId, false)
+      break
     case 'export':
-      exportConversation()
+      await handleExport(conversationId)
       break
-      
     case 'delete':
-      try {
-        await ElMessageBox.confirm(
-          'Supprimer cette conversation ?',
-          'Confirmation',
-          { type: 'warning' }
-        )
-        await chatStore.deleteConversation(conversation.id)
-      } catch {}
+      await handleDelete(conversationId)
       break
   }
 }
 
-/**
- * Exporter la conversation
- */
-function exportConversation() {
-  const conversation = chatStore.currentConversation
-  const messages = chatStore.messages
-  
-  const content = messages.map(m => {
-    const role = m.role === 'USER' ? 'Vous' : 'IroBot'
-    return `[${role}]\n${m.content}\n`
-  }).join('\n---\n\n')
-  
-  const blob = new Blob([content], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${conversation.title || 'conversation'}.txt`
-  a.click()
-  URL.revokeObjectURL(url)
-  
-  ElMessage.success('Conversation exportée')
+async function handleRename(conversationId) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      'Nouveau titre de la conversation',
+      'Renommer',
+      {
+        confirmButtonText: 'Enregistrer',
+        cancelButtonText: 'Annuler',
+        inputValue: chatStore.currentConversation?.title,
+        inputPattern: /.+/,
+        inputErrorMessage: 'Le titre ne peut pas être vide'
+      }
+    )
+    
+    if (value) {
+      await chatStore.updateConversationTitle(conversationId, value)
+    }
+  } catch (error) {
+    // Annulé
+  }
+}
+
+async function handleExport(conversationId) {
+  ElMessage.info('Export en cours...')
+  // TODO: Implémenter l'export
+}
+
+async function handleDelete(conversationId) {
+  try {
+    await ElMessageBox.confirm(
+      'Cette action est irréversible. Continuer ?',
+      'Supprimer la conversation',
+      {
+        confirmButtonText: 'Supprimer',
+        cancelButtonText: 'Annuler',
+        type: 'warning'
+      }
+    )
+    
+    await chatStore.deleteConversation(conversationId)
+  } catch (error) {
+    // Annulé
+  }
 }
 
 // ============================================================================
@@ -576,51 +525,104 @@ onMounted(() => {
   width: 100%;
 }
 
-// Streaming indicator
-.streaming-indicator {
+// ✅ INDICATEUR "IROBOT RÉFLÉCHIT..."
+.generating-bubble {
   display: flex;
-  align-items: center;
   gap: 12px;
-  padding: 12px 16px;
-  background: var(--card-bg);
-  border-radius: 12px;
-  box-shadow: var(--shadow-sm);
+  padding: 16px 0;
+  animation: fadeIn 0.3s ease;
   
-  .typing-dots {
+  .generating-avatar {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
     display: flex;
-    gap: 4px;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #005ca9 0%, #0077cc 100%);
+    border-radius: 12px;
+    color: white;
+    box-shadow: 0 2px 8px rgba(0, 92, 169, 0.3);
+  }
+  
+  .generating-content {
+    display: flex;
+    flex-direction: column;
+    max-width: 75%;
+    min-width: 200px;
+  }
+  
+  .generating-header {
+    margin-bottom: 6px;
     
-    span {
-      width: 8px;
-      height: 8px;
-      background: var(--primary-color);
-      border-radius: 50%;
-      animation: typing 1.4s infinite;
-      
-      &:nth-child(2) {
-        animation-delay: 0.2s;
-      }
-      
-      &:nth-child(3) {
-        animation-delay: 0.4s;
-      }
+    .generating-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
     }
   }
   
-  .typing-text {
-    font-size: 13px;
-    color: var(--text-secondary);
+  .generating-body {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 20px 20px 20px 4px;
+    padding: 14px 18px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    
+    .generating-text {
+      font-size: 14px;
+      color: #6b7280;
+    }
+    
+    .generating-dots {
+      display: flex;
+      gap: 4px;
+      
+      .dot {
+        width: 6px;
+        height: 6px;
+        background: #005ca9;
+        border-radius: 50%;
+        animation: bounce 1.4s infinite;
+        
+        &:nth-child(1) {
+          animation-delay: 0s;
+        }
+        
+        &:nth-child(2) {
+          animation-delay: 0.2s;
+        }
+        
+        &:nth-child(3) {
+          animation-delay: 0.4s;
+        }
+      }
+    }
   }
 }
 
-@keyframes typing {
+@keyframes bounce {
   0%, 60%, 100% {
     opacity: 0.3;
     transform: translateY(0);
   }
   30% {
     opacity: 1;
-    transform: translateY(-4px);
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -630,6 +632,7 @@ onMounted(() => {
   bottom: 20px;
   right: 20px;
   box-shadow: var(--shadow-md);
+  z-index: 10;
 }
 
 // Input container
@@ -637,118 +640,84 @@ onMounted(() => {
   padding: 16px 20px;
   background: var(--card-bg);
   border-top: 1px solid var(--border-color);
-  
-  .cancel-btn {
-    margin-bottom: 12px;
-  }
 }
 
 .input-wrapper {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  background: var(--bg-color);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 8px 12px;
-  transition: border-color 0.2s;
+  position: relative;
   
-  &:focus-within {
-    border-color: var(--primary-color);
+  .input-actions {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .char-count {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    
+    &.warning {
+      color: #f59e0b;
+    }
+    
+    &.error {
+      color: #ef4444;
+      font-weight: 600;
+    }
+  }
+  
+  .send-btn {
+    width: 36px;
+    height: 36px;
   }
   
   :deep(.el-textarea__inner) {
-    border: none;
-    background: transparent;
-    box-shadow: none;
-    padding: 4px 0;
-    resize: none;
-    
-    &:focus {
-      box-shadow: none;
-    }
-  }
-  
-  .input-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    
-    .char-count {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      
-      &.warning {
-        color: var(--warning-color);
-      }
-      
-      &.error {
-        color: var(--error-color);
-      }
-    }
-    
-    .send-btn {
-      width: 36px;
-      height: 36px;
-    }
+    padding-right: 120px !important;
+    padding-bottom: 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.6;
   }
 }
 
 .input-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 8px 0 0;
-  font-size: 11px;
-  color: var(--text-tertiary);
   
   .el-icon {
-    font-size: 12px;
+    font-size: 14px;
   }
 }
 
 // Transitions
-.message-enter-active {
-  animation: slideUp 0.3s ease;
+.message-enter-active,
+.message-leave-active {
+  transition: all 0.3s ease;
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.message-enter-from {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.message-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
 }
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.2s;
+  transition: opacity 0.3s ease;
 }
 
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-}
-
-// Responsive
-@media (max-width: 768px) {
-  .messages-container {
-    padding: 12px;
-  }
-  
-  .input-container {
-    padding: 12px;
-  }
-  
-  .welcome-state {
-    .suggestions {
-      .suggestion-chips {
-        flex-direction: column;
-      }
-    }
-  }
 }
 </style>

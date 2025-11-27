@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, AsyncGenerator
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, and_
 
 from app.core.config import settings
@@ -39,6 +39,7 @@ from app.schemas.message import (
     ChatStreamEndEvent,
     ChatStreamErrorEvent,
     SourceReference,
+    MessageResponse
 )
 from app.schemas.conversation import ConversationResponse, ConversationSummary
 
@@ -745,25 +746,25 @@ class ChatService:
         if not conversation:
             return None
         
-        messages = db.query(Message).filter(
-            Message.conversation_id == conversation_id
-        ).order_by(Message.created_at).all()
+        messages = db.query(Message).options(
+                joinedload(Message.feedbacks)  # Charger la relation feedbacks
+            ).filter(
+                Message.conversation_id == conversation_id
+            ).order_by(Message.created_at).all()
+        
+        for message in messages:
+            # Filtrer les feedbacks pour ne garder que celui de l'utilisateur actuel
+            user_feedback = next(
+                (f for f in message.feedbacks if f.user_id == user_id),
+                None
+            )
+            # Ajouter l'attribut .feedback (singulier) sur le message
+            # Pydantic avec from_attributes=True utilisera cet attribut
+            message.feedback = user_feedback
         
         return {
             "conversation": ConversationResponse.model_validate(conversation),
-            "messages": [
-                {
-                    "id": str(m.id),
-                    "role": m.role.value,
-                    "content": m.content,
-                    "sources": m.sources,
-                    "created_at": m.created_at.isoformat(),
-                    "cache_hit": m.cache_hit,
-                    "token_count_total": m.token_count_total,
-                    "cost_xaf": m.cost_xaf
-                }
-                for m in messages
-            ]
+            "messages": [MessageResponse.model_validate(m) for m in messages]
         }
     
     def delete_conversation(
