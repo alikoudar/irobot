@@ -65,10 +65,14 @@ onMounted(async () => {
   // Charger les conversations
   await chatStore.fetchConversations()
   
-  // Si une conversation est dans l'URL, la charger
+  // 🔥 AJOUT v2.3 : Restaurer la dernière conversation active
   const conversationId = route.query.conversation
   if (conversationId) {
+    // Si conversation dans l'URL, la charger
     await chatStore.fetchConversation(conversationId)
+  } else {
+    // Sinon, restaurer la dernière conversation active depuis localStorage
+    await chatStore.restoreLastConversation()
   }
 })
 

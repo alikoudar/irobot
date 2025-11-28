@@ -13,7 +13,7 @@ from typing import Optional, List, Any
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer
 
 
 # =============================================================================
@@ -107,6 +107,11 @@ class QueryCacheResponse(QueryCacheBase):
     updated_at: datetime
     is_expired: bool = False
     
+    @field_serializer('last_hit_at', 'expires_at', 'created_at', 'updated_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
+    
     @field_validator('is_expired', mode='before')
     @classmethod
     def check_expired(cls, v, info):
@@ -145,6 +150,11 @@ class CacheDocumentMapResponse(CacheDocumentMapBase):
     
     id: UUID
     created_at: datetime
+    
+    @field_serializer('created_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 # =============================================================================
@@ -192,6 +202,11 @@ class CacheStatisticsResponse(CacheStatisticsBase):
     cost_saved_xaf: Decimal
     created_at: datetime
     updated_at: datetime
+    
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 class CacheStatisticsListResponse(BaseModel):

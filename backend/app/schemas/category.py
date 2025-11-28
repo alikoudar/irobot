@@ -1,5 +1,5 @@
 """Category schemas."""
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import Optional
 from datetime import datetime
 import uuid
@@ -93,6 +93,11 @@ class CategoryResponse(CategoryBase):
     created_by: Optional[uuid.UUID]
     created_at: datetime
     updated_at: datetime
+    
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     class Config:
         from_attributes = True

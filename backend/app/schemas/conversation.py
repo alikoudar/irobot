@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 # =============================================================================
@@ -97,6 +97,11 @@ class ConversationResponse(BaseModel):
         default=None,
         description="Date du dernier message"
     )
+    
+    @field_serializer('created_at', 'updated_at', 'archived_at', 'last_message_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 class ConversationListResponse(BaseModel):
@@ -119,6 +124,11 @@ class ConversationSummary(BaseModel):
     is_archived: bool
     updated_at: datetime
     message_count: Optional[int] = None
+    
+    @field_serializer('updated_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     # Aperçu du dernier message (optionnel)
     last_message_preview: Optional[str] = Field(

@@ -142,6 +142,47 @@ def get_exchange_rate() -> float:
         return 615.0
 
 
+def calculate_title_generation_cost(
+    token_count_input: int,
+    token_count_output: int,
+    model_name: str,
+    exchange_rate: float
+) -> tuple[float, float]:
+    """
+    Calcule le coût de génération de titre.
+    
+    Args:
+        token_count_input: Tokens en entrée
+        token_count_output: Tokens en sortie
+        model_name: Nom du modèle (pour récupérer tarifs)
+        exchange_rate: Taux USD/XAF
+        
+    Returns:
+        Tuple (cost_usd, cost_xaf)
+    """
+    # Tarifs Mistral par défaut (mistral-small pour titres)
+    price_per_million_input = 0.10
+    price_per_million_output = 0.30
+    
+    # Adapter selon le modèle
+    if "medium" in model_name.lower():
+        price_per_million_input = 2.7
+        price_per_million_output = 8.1
+    elif "large" in model_name.lower():
+        price_per_million_input = 2.0
+        price_per_million_output = 6.0
+    
+    # Calcul coût USD
+    cost_input = (token_count_input / 1_000_000) * price_per_million_input
+    cost_output = (token_count_output / 1_000_000) * price_per_million_output
+    cost_usd = cost_input + cost_output
+    
+    # Calcul coût XAF
+    cost_xaf = cost_usd * exchange_rate
+    
+    return round(cost_usd, 6), round(cost_xaf, 4)
+
+
 # =============================================================================
 # DATA CLASSES (Interface attendue par chat_service.py)
 # =============================================================================
@@ -190,6 +231,31 @@ class GenerationResult:
     metadata: GenerationMetadata
     sources: List[Dict[str, Any]] = field(default_factory=list)
     format_used: ResponseFormat = ResponseFormat.DEFAULT
+
+
+@dataclass
+class TitleGenerationResult:
+    """
+    Résultat de génération de titre avec métriques complètes.
+    
+    Attributes:
+        content: Le titre généré
+        model_name: Nom du modèle utilisé
+        token_count_input: Nombre de tokens en entrée
+        token_count_output: Nombre de tokens en sortie
+        token_count_total: Total tokens
+        cost_usd: Coût en USD
+        cost_xaf: Coût en XAF
+        exchange_rate: Taux de change utilisé
+    """
+    content: str
+    model_name: str
+    token_count_input: int
+    token_count_output: int
+    token_count_total: int
+    cost_usd: float
+    cost_xaf: float
+    exchange_rate: float
 
 
 # =============================================================================
@@ -531,15 +597,38 @@ class LLMGenerator:
             logger.error(f"Erreur génération: {e}")
             raise
     
-    def generate_title(self, query: str, model: Optional[str] = None) -> str:
-        """Génère un titre court pour une conversation."""
+    def generate_title_with_metrics(
+        self, 
+        query: str, 
+        model: Optional[str] = None
+    ) -> TitleGenerationResult:
+        """
+        Génère un titre court pour une conversation avec métriques complètes.
+        
+        ✅ NOUVEAU : Retourne TOUTES les métriques (tokens, coûts) en plus du titre.
+        
+        Args:
+            query: Question de l'utilisateur
+            model: Modèle à utiliser (optionnel, utilise config DB si None)
+            
+        Returns:
+            TitleGenerationResult avec titre et métriques complètes
+            
+        Raises:
+            Exception: Si erreur génération (retourne titre fallback avec métriques)
+        """
         config = get_title_generation_config()
         if model is None:
             model = config["model"]
         
+        # Récupérer le taux de change
+        exchange_rate = get_exchange_rate()
+        
+        # Construire le prompt
         prompt = self.prompt_builder.build_title_prompt(query)
         
         try:
+            # Appel API Mistral
             response = self.client.chat.complete(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
@@ -547,19 +636,84 @@ class LLMGenerator:
                 temperature=config["temperature"]
             )
             
+            # Extraire le titre
             title = response.choices[0].message.content.strip()
             title = title.strip('"\'')
             
             if len(title) > 50:
                 title = title[:47] + "..."
             
-            logger.debug(f"Titre généré: '{title}'")
-            return title
+            # Extraire les métriques de l'API Mistral
+            token_count_input = response.usage.prompt_tokens
+            token_count_output = response.usage.completion_tokens
+            token_count_total = response.usage.total_tokens
+            
+            # Calculer les coûts
+            cost_usd, cost_xaf = calculate_title_generation_cost(
+                token_count_input=token_count_input,
+                token_count_output=token_count_output,
+                model_name=model,
+                exchange_rate=exchange_rate
+            )
+            
+            logger.debug(
+                f"Titre généré: '{title}' "
+                f"(tokens: {token_count_total}, cost: ${cost_usd:.6f})"
+            )
+            
+            # Retourner résultat complet
+            return TitleGenerationResult(
+                content=title,
+                model_name=model,
+                token_count_input=token_count_input,
+                token_count_output=token_count_output,
+                token_count_total=token_count_total,
+                cost_usd=cost_usd,
+                cost_xaf=cost_xaf,
+                exchange_rate=exchange_rate
+            )
             
         except Exception as e:
             logger.error(f"Erreur génération titre: {e}")
+            
+            # Fallback : premiers mots de la question
             words = query.split()[:5]
-            return " ".join(words)[:50]
+            fallback_title = " ".join(words)[:50]
+            
+            # Retourner résultat fallback avec métriques à 0
+            return TitleGenerationResult(
+                content=fallback_title,
+                model_name=model,
+                token_count_input=0,
+                token_count_output=0,
+                token_count_total=0,
+                cost_usd=0.0,
+                cost_xaf=0.0,
+                exchange_rate=exchange_rate
+            )
+    
+    def generate_title(self, query: str, model: Optional[str] = None) -> str:
+        """
+        Génère un titre court pour une conversation.
+        
+        ✅ MODIFIÉ : Appelle generate_title_with_metrics() en interne mais retourne
+        seulement le titre (backward compatibility).
+        
+        Args:
+            query: Question de l'utilisateur
+            model: Modèle à utiliser (optionnel)
+            
+        Returns:
+            str: Le titre généré
+        """
+        # Appeler la nouvelle fonction avec métriques
+        result = self.generate_title_with_metrics(query, model)
+        
+        # Retourner seulement le titre (backward compatibility)
+        return result.content
+        
+
+        
 
 
 # =============================================================================

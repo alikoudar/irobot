@@ -14,7 +14,7 @@ from typing import Optional, List
 from uuid import UUID
 from enum import Enum
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 # =============================================================================
@@ -93,6 +93,11 @@ class FeedbackResponse(BaseModel):
     rating: FeedbackRatingEnum
     comment: Optional[str] = None
     created_at: datetime
+    
+    @field_serializer('created_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 class FeedbackWithContext(FeedbackResponse):

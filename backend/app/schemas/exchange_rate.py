@@ -1,5 +1,5 @@
 """Schemas Pydantic pour ExchangeRate."""
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
@@ -26,6 +26,11 @@ class ExchangeRateResponse(ExchangeRateBase):
     fetched_at: datetime
     created_at: datetime
     
+    @field_serializer('fetched_at', 'created_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
+    
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -39,6 +44,11 @@ class CurrentExchangeRate(BaseModel):
     fetched_at: datetime
     age_seconds: int = Field(description="Âge du taux en secondes")
     is_stale: bool = Field(description="True si le taux est périmé (> 24h)")
+    
+    @field_serializer('fetched_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 # ============== Conversion ==============
@@ -58,6 +68,11 @@ class ConversionResponse(BaseModel):
     to_currency: str
     rate_used: float
     rate_fetched_at: datetime
+    
+    @field_serializer('rate_fetched_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 # ============== API Response ==============
@@ -90,3 +105,8 @@ class ExchangeRateStats(BaseModel):
     avg_rate_30d: float
     last_update: datetime
     update_count_30d: int
+    
+    @field_serializer('last_update')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None

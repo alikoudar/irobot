@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any
 from uuid import UUID
 from enum import Enum
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 
 
 
@@ -158,6 +158,11 @@ class MessageResponse(BaseModel):
         description="Temps de réponse en secondes"
     )
     created_at: datetime
+    
+    @field_serializer('created_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     # ✅ CORRECTION Sprint 9 : Feedback utilisateur
     feedback: Optional["FeedbackResponse"] = Field(

@@ -23,6 +23,10 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.rag.retriever import RetrievedChunk
 
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
 # Configuration du logger
 logger = logging.getLogger(__name__)
 
@@ -206,7 +210,9 @@ Format attendu :
         self,
         query: str,
         chunks: List[RetrievedChunk],
-        top_n: int = None
+        top_n: int = None,
+        user_id: Optional[UUID] = None,  # ✅ NOUVEAU
+        db: Optional[Session] = None
     ) -> List[RerankResult]:
         """
         Rerank les chunks et retourne les top N les plus pertinents.
@@ -243,7 +249,16 @@ Format attendu :
         
         try:
             # Étape 1: Évaluer la pertinence de chaque chunk
-            scores = await self._evaluate_chunks(query, chunks, model)
+            # ✅ MODIFIÉ : Récupérer aussi result avec les métriques
+            scores, mistral_result = await self._evaluate_chunks(query, chunks, model)
+
+            # ✅ MODIFIÉ : Tracking direct avec le result
+            if db is not None and user_id is not None and mistral_result:
+                self._track_reranking_usage(
+                    result=mistral_result,
+                    user_id=user_id,
+                    db=db
+                )
             
             # Étape 2: Créer les RerankResult
             results = self._create_results(chunks, scores)
@@ -273,7 +288,7 @@ Format attendu :
         query: str,
         chunks: List[RetrievedChunk],
         model: str
-    ) -> List[dict]:
+    ) -> Tuple[List[dict], Any]:
         """
         Évalue la pertinence de chaque chunk via Mistral.
         
@@ -283,7 +298,9 @@ Format attendu :
             model: Modèle à utiliser
         
         Returns:
-            Liste de dictionnaires avec index, score et reason
+            Tuple (scores, result) où:
+            - scores: Liste de dictionnaires avec index, score et reason
+            - result: Résultat complet de l'appel Mistral (avec métriques)
         """
         # Construction du texte des chunks
         chunks_text = self._format_chunks_for_prompt(chunks)
@@ -308,7 +325,8 @@ Format attendu :
         # Parsing de la réponse JSON
         scores = self._parse_scores_response(result.content, len(chunks))
         
-        return scores
+        # ✅ MODIFIÉ : Retourner aussi result pour le tracking
+        return scores, result
     
     def _format_chunks_for_prompt(self, chunks: List[RetrievedChunk]) -> str:
         """
@@ -439,6 +457,75 @@ Format attendu :
         
         return results
     
+    def _track_reranking_usage(
+        self,
+        result,
+        user_id: UUID,
+        db: Session
+    ) -> None:
+        """
+        Track les tokens/coûts du reranking.
+        
+        Args:
+            result: Résultat de l'appel Mistral (GenerationResult)
+            user_id: ID de l'utilisateur
+            db: Session DB
+        """
+        try:
+            from app.models.token_usage import TokenUsage, OperationType
+            from app.services.exchange_rate_service import ExchangeRateService
+            
+            # Récupérer le taux de change
+            exchange_rate = ExchangeRateService.get_current_rate(db, "USD", "XAF")
+            if exchange_rate is None:
+                exchange_rate = 615.0  # Fallback
+            
+            # ✅ STRUCTURE RÉELLE : GenerationResult de mistral_client.py
+            # result.content (str)
+            # result.token_count_input (int)
+            # result.token_count_output (int)
+            # result.model (str)
+            # result.processing_time (float)
+            
+            token_count_input = result.token_count_input
+            token_count_output = result.token_count_output
+            token_count_total = token_count_input + token_count_output
+            model_name = result.model
+            
+            # Calculer les coûts via mistral_client
+            costs = self.mistral_client.calculate_cost(
+                model=model_name,
+                token_count_input=token_count_input,
+                token_count_output=token_count_output
+            )
+            cost_usd = costs["cost_total"]
+            cost_xaf = cost_usd * float(exchange_rate)
+            
+            usage = TokenUsage(
+                operation_type=OperationType.RERANKING,
+                model_name=model_name,
+                token_count_input=token_count_input,
+                token_count_output=token_count_output,
+                token_count_total=token_count_total,
+                cost_usd=round(cost_usd, 6),
+                cost_xaf=round(cost_xaf, 4),
+                exchange_rate=float(exchange_rate),
+                user_id=user_id,
+                message_id=None,  # Pas de message associé
+                document_id=None
+            )
+            db.add(usage)
+            db.commit()
+            
+            logger.info(
+                f"Reranking tokens tracked: {token_count_total} tokens, "
+                f"${cost_usd:.6f} (model: {model_name})"
+            )
+        except Exception as e:
+            logger.error(f"Erreur tracking reranking: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
     async def rerank_simple(
         self,
         query: str,

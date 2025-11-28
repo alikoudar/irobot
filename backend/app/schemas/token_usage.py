@@ -1,5 +1,5 @@
 """Schemas Pydantic pour TokenUsage."""
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
@@ -46,6 +46,11 @@ class TokenUsageResponse(TokenUsageBase):
     token_metadata: Optional[dict[str, Any]] = None
     created_at: datetime
     
+    @field_serializer('created_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
+    
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -84,6 +89,11 @@ class TokenUsageByDate(BaseModel):
     total_cost_usd: float
     total_cost_xaf: float
     count: int
+    
+    @field_serializer('date')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
 
 
 class TokenUsageStats(BaseModel):

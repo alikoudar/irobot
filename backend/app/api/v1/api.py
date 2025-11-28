@@ -5,7 +5,8 @@ from app.api.v1.endpoints import (auth,
                                   categories, 
                                   documents,
                                   chat,
-                                  feedbacks)
+                                  feedbacks,
+                                  dashboard)
 
 # Créer le router principal v1
 api_router = APIRouter()
@@ -41,4 +42,9 @@ api_router.include_router(
 api_router.include_router(
     feedbacks.router,
     tags=["Feedbacks"]
+)
+
+api_router.include_router(
+    dashboard.router,
+    tags=["Dashboard"]
 )

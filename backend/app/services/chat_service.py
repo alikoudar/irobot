@@ -442,7 +442,9 @@ class ChatService:
         reranked_results = await self.reranker.rerank(
             query=query,
             chunks=chunks,
-            top_n=get_chat_config()["rerank_top_n"]
+            top_n=get_chat_config()["rerank_top_n"],
+            user_id=user.id,  
+            db=db   
         )
         
         # Convertir en format dict pour le generator
@@ -566,14 +568,15 @@ class ChatService:
         
         # 8. Tracker l'utilisation des tokens
         self._track_token_usage(
+            operation_type=OperationType.RESPONSE_GENERATION,
             user_id=user.id,
-            message_id=assistant_message_id,
             model_name=model_used,
             token_count_input=total_tokens_input,
             token_count_output=total_tokens_output,
             cost_usd=cost_usd,
             cost_xaf=cost_xaf,
-            db=db
+            db=db,
+            message_id=assistant_message_id
         )
         
         # 9. Générer le titre si nouvelle conversation
@@ -1082,10 +1085,26 @@ class ChatService:
             db: Session DB
         """
         try:
-            title = self.generator.generate_title(query)
-            conversation.title = title
+            result = self.generator.generate_title_with_metrics(query)
+            conversation.title = result.content
             db.commit()
-            logger.info(f"Titre généré pour conversation {conversation.id}: {title}")
+
+            self._track_token_usage(
+            operation_type=OperationType.TITLE_GENERATION,
+            user_id=conversation.user_id,
+            model_name=result.model_name,
+            token_count_input=result.token_count_input,
+            token_count_output=result.token_count_output,
+            cost_usd=result.cost_usd,
+            cost_xaf=result.cost_xaf,
+            db=db,
+            message_id=None  # Pas de message associé
+            )
+            
+            logger.info(
+                f"Titre généré pour conversation {conversation.id}: {conversation.title} "
+                f"(tokens: {result.token_count_total}, cost: ${result.cost_usd})")
+            
         except Exception as e:
             logger.error(f"Erreur génération titre: {e}")
             # Fallback : premiers mots de la question
@@ -1097,12 +1116,14 @@ class ChatService:
         self,
         user_id: UUID,
         message_id: UUID,
+        operation_type: OperationType, 
         model_name: str,
         token_count_input: int,
         token_count_output: int,
         cost_usd: float,
         cost_xaf: float,
-        db: Session
+        db: Session, 
+        document_id: Optional[UUID] = None
     ) -> None:
         """
         Enregistre l'utilisation des tokens.
@@ -1110,6 +1131,7 @@ class ChatService:
         Args:
             user_id: ID de l'utilisateur
             message_id: ID du message
+            operation_type=operation_type,
             model_name: Nom du modèle
             token_count_input: Tokens en entrée
             token_count_output: Tokens en sortie
@@ -1125,7 +1147,7 @@ class ChatService:
             exchange_rate = 569.41080  # Fallback
 
         usage = TokenUsage(
-            operation_type=OperationType.RESPONSE_GENERATION,
+            operation_type=operation_type,
             model_name=model_name,
             token_count_input=token_count_input,
             token_count_output=token_count_output,
@@ -1134,7 +1156,8 @@ class ChatService:
             cost_xaf=cost_xaf,
             exchange_rate=float(exchange_rate),
             user_id=user_id,
-            message_id=message_id
+            message_id=message_id,
+            document_id=document_id 
         )
         db.add(usage)
         db.commit()

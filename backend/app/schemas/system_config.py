@@ -1,5 +1,5 @@
 """Schemas Pydantic pour SystemConfig."""
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
@@ -31,6 +31,11 @@ class SystemConfigResponse(SystemConfigBase):
     updated_by: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+    
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     model_config = ConfigDict(from_attributes=True)
 

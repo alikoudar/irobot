@@ -16,6 +16,7 @@
  * - ✅ Pas de gestion SSE complexe
  * 
  * Sprint 9 - Correction: Utilisation endpoint non-streaming
+ * CORRECTIF 2025-11-27: Continuité conversation_id corrigée
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -108,9 +109,14 @@ export const useChatStore = defineStore('chat', () => {
   
   /**
    * Récupérer la liste des conversations
+   * 
+   * ✅ CORRIGÉ v2.2 : Ne JAMAIS toucher à currentConversation
    */
   async function fetchConversations(options = {}) {
     isLoading.value = true
+    
+    // 🔥 IMPORTANT : Sauvegarder currentConversation avant le chargement
+    const savedCurrentConversation = currentConversation.value
     
     try {
       const params = {
@@ -130,6 +136,12 @@ export const useChatStore = defineStore('chat', () => {
       total.value = data.total || 0
       totalPages.value = data.total_pages || 1
       page.value = data.page || 1
+      
+      // 🔥 CORRECTION v2.2 : Restaurer currentConversation si elle existait
+      if (savedCurrentConversation?.id) {
+        currentConversation.value = savedCurrentConversation
+        console.log('🔒 currentConversation préservé:', savedCurrentConversation.id)
+      }
       
       console.log('✅ Conversations chargées:', conversations.value.length)
       return conversations.value
@@ -160,6 +172,7 @@ export const useChatStore = defineStore('chat', () => {
       
       console.log('✅ Conversation chargée:', data.title)
       console.log('✅ Messages:', messages.value.length)
+      console.log('🔍 [DEBUG] currentConversation.value.id:', currentConversation.value?.id)
       
       return data
       
@@ -180,6 +193,8 @@ export const useChatStore = defineStore('chat', () => {
   
   /**
    * Créer une nouvelle conversation
+   * 
+   * ✅ CORRIGÉ v2.1 : Réinitialise toujours (le bug était ailleurs, dans sendMessage)
    */
   function createConversation() {
     currentConversation.value = null
@@ -192,7 +207,19 @@ export const useChatStore = defineStore('chat', () => {
    * Sélectionner une conversation
    */
   async function selectConversation(conversationId) {
-    return fetchConversation(conversationId)
+    const result = await fetchConversation(conversationId)
+    
+    // 🔥 PERSISTENCE : Sauvegarder l'ID dans localStorage
+    if (result?.id) {
+      try {
+        localStorage.setItem('irobot_current_conversation_id', result.id)
+        console.log('💾 Conversation ID sauvegardé:', result.id)
+      } catch (e) {
+        console.warn('Impossible de sauvegarder dans localStorage:', e)
+      }
+    }
+    
+    return result
   }
   
   /**
@@ -205,7 +232,9 @@ export const useChatStore = defineStore('chat', () => {
       conversations.value = conversations.value.filter(c => c.id !== conversationId)
       
       if (currentConversation.value?.id === conversationId) {
-        createConversation()
+        // ✅ CORRECTION : Vraiment réinitialiser ici car conversation supprimée
+        currentConversation.value = null
+        messages.value = []
       }
       
       total.value = Math.max(0, total.value - 1)
@@ -293,11 +322,7 @@ export const useChatStore = defineStore('chat', () => {
    * 
    * NOUVEAU : Utilise /api/v1/chat au lieu de /api/v1/chat/stream
    * 
-   * AVANTAGES :
-   * - Plus d'IDs temporaires
-   * - UUIDs réels dès la réponse
-   * - Code 10x plus simple
-   * - Boutons feedback fonctionnent immédiatement
+   * ✅ CORRIGÉ : Maintient correctement currentConversation.value entre les messages
    * 
    * @param {string} messageContent - Contenu du message
    * @param {string|null} conversationId - ID de la conversation
@@ -311,16 +336,21 @@ export const useChatStore = defineStore('chat', () => {
     isSending.value = true
     isGenerating.value = true
     
+    // ✅ CORRECTION : Prioriser conversationId passé en paramètre, sinon currentConversation
     const convId = conversationId || currentConversation.value?.id
+    
+    console.log('🔍 [DEBUG] Avant envoi - convId:', convId)
+    console.log('🔍 [DEBUG] Avant envoi - currentConversation.value?.id:', currentConversation.value?.id)
     
     try {
       console.log('📤 Envoi message:', messageContent.substring(0, 50))
+      console.log('🔍 [DEBUG] conversation_id envoyé:', convId)
       
       // Appel API simple (NON-STREAMING)
       const response = await api.post('/chat', {
         message: messageContent,
-        conversation_id: convId,
-        stream: false  // Explicite: pas de streaming
+        conversation_id: convId,  // ✅ Envoie bien le conversation_id
+        stream: false
       })
       
       const data = response.data
@@ -328,29 +358,87 @@ export const useChatStore = defineStore('chat', () => {
       console.log('✅ Réponse reçue:', {
         conversation_id: data.conversation_id,
         message_id: data.message_id,
+        title: data.title,
         content_length: data.content?.length
       })
       
-      // Mettre à jour la conversation courante
+      // ✅ CRITIQUE : Mettre à jour currentConversation IMMÉDIATEMENT
       if (data.conversation_id) {
-        if (!currentConversation.value || currentConversation.value.id !== data.conversation_id) {
-          currentConversation.value = {
-            id: data.conversation_id,
-            title: 'Nouvelle conversation',
-            is_archived: false
+        // 🔥 CORRECTION #1 : TOUJOURS mettre à jour (même si même ID)
+        // Car le titre peut avoir changé (auto-généré par backend)
+        currentConversation.value = {
+          id: data.conversation_id,
+          title: data.title || 'Nouvelle conversation',
+          is_archived: false,
+          message_count: data.message_count || 2,
+          created_at: data.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+        
+        console.log('🔄 currentConversation mis à jour:', {
+          id: currentConversation.value.id,
+          title: currentConversation.value.title
+        })
+      }
+      
+      // 🔥 CORRECTION #2 : Ne PAS recharger avec fetchConversation
+      // Car ça écrase currentConversation avec les anciennes données
+      // À la place, juste recharger les messages
+      if (data.conversation_id) {
+        try {
+          const messagesResponse = await api.get(`/chat/conversations/${data.conversation_id}`)
+          messages.value = messagesResponse.data.messages || []
+          
+          // Mettre à jour le titre SI le backend retourne un nouveau
+          if (messagesResponse.data.title && messagesResponse.data.title !== 'Nouvelle conversation') {
+            currentConversation.value.title = messagesResponse.data.title
           }
+          
+          console.log('✅ Messages rechargés:', messages.value.length)
+        } catch (err) {
+          console.error('❌ Erreur rechargement messages:', err)
         }
       }
       
-      // Recharger les messages de la conversation
-      // (le backend a créé les 2 messages: USER + ASSISTANT)
-      if (data.conversation_id) {
-        await fetchConversation(data.conversation_id)
+      // 🔥 CORRECTION #3 : Ajouter/Mettre à jour la conversation dans la liste
+      // Au lieu de TOUT recharger
+      const existingIndex = conversations.value.findIndex(c => c.id === data.conversation_id)
+      
+      if (existingIndex >= 0) {
+        // Conversation existe : mettre à jour
+        const newUpdatedAt = new Date().toISOString()
+        conversations.value[existingIndex] = {
+          ...conversations.value[existingIndex],
+          title: currentConversation.value.title,
+          updated_at: newUpdatedAt,
+          message_count: messages.value.length
+        }
+        console.log('📝 Conversation mise à jour dans la liste')
+        console.log('🔍 [DEBUG] updated_at mis à jour:', newUpdatedAt)
+      } else {
+        // Nouvelle conversation : ajouter en tête
+        const newUpdatedAt = new Date().toISOString()
+        conversations.value.unshift({
+          id: data.conversation_id,
+          title: currentConversation.value.title,
+          is_archived: false,
+          message_count: messages.value.length,
+          created_at: data.created_at || new Date().toISOString(),
+          updated_at: newUpdatedAt
+        })
+        total.value += 1
+        console.log('➕ Nouvelle conversation ajoutée à la liste')
+        console.log('🔍 [DEBUG] updated_at nouvelle conversation:', newUpdatedAt)
       }
       
-      // Recharger la liste des conversations si nouvelle
-      if (!convId) {
-        await fetchConversations()
+      // 🔥 PERSISTENCE : Sauvegarder l'ID de la conversation active
+      if (currentConversation.value?.id) {
+        try {
+          localStorage.setItem('irobot_current_conversation_id', currentConversation.value.id)
+          console.log('💾 Conversation ID sauvegardé:', currentConversation.value.id)
+        } catch (e) {
+          console.warn('Impossible de sauvegarder dans localStorage:', e)
+        }
       }
       
       return {
@@ -445,6 +533,39 @@ export const useChatStore = defineStore('chat', () => {
   // ACTIONS - UTILITAIRES
   // ===========================================================================
   
+  /**
+   * Restaurer la dernière conversation active depuis localStorage
+   * 
+   * ✅ AJOUTÉ v2.3 : Persistence du highlight entre les sessions
+   */
+  async function restoreLastConversation() {
+    try {
+      const savedId = localStorage.getItem('irobot_current_conversation_id')
+      
+      if (savedId) {
+        console.log('🔄 Restauration conversation sauvegardée:', savedId)
+        
+        // Vérifier que cette conversation existe dans la liste
+        const exists = conversations.value.some(c => c.id === savedId)
+        
+        if (exists) {
+          // Charger la conversation
+          await fetchConversation(savedId)
+          console.log('✅ Conversation restaurée:', savedId)
+          return true
+        } else {
+          console.log('⚠️ Conversation sauvegardée non trouvée dans la liste')
+          // Nettoyer le localStorage
+          localStorage.removeItem('irobot_current_conversation_id')
+        }
+      }
+    } catch (e) {
+      console.warn('Erreur restauration conversation:', e)
+    }
+    
+    return false
+  }
+  
   function reset() {
     conversations.value = []
     currentConversation.value = null
@@ -522,6 +643,7 @@ export const useChatStore = defineStore('chat', () => {
     deleteFeedback,
     
     // Actions - Utilitaires
+    restoreLastConversation,
     reset,
     $reset,
     setPage,

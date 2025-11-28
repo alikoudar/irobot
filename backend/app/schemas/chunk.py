@@ -1,5 +1,5 @@
 """Chunk schemas."""
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import uuid
@@ -84,6 +84,11 @@ class ChunkResponse(ChunkBase):
     embedding_time_seconds: Optional[float] = None
     created_at: datetime
     indexed_at: Optional[datetime] = None
+    
+    @field_serializer('created_at', 'indexed_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     class Config:
         from_attributes = True

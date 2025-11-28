@@ -14,7 +14,7 @@
     <div class="item-content">
       <div class="item-title">{{ conversation.title || 'Nouvelle conversation' }}</div>
       <div class="item-meta">
-        <span class="item-date">{{ formatDate(conversation.updated_at) }}</span>
+        <span class="item-date">{{ relativeTime }}</span>
         <span v-if="conversation.message_count" class="item-count">
           {{ conversation.message_count }} msg
         </span>
@@ -62,7 +62,9 @@
  * Item individuel de conversation dans la sidebar.
  * 
  * Sprint 8 - Phase 2 : Composants Chat
+ * ✅ CORRIGÉ v2.4 : Temps relatif réactif (se met à jour automatiquement)
  */
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   ChatLineSquare,
   FolderOpened,
@@ -90,18 +92,58 @@ const props = defineProps({
 const emit = defineEmits(['click', 'delete', 'archive', 'rename'])
 
 // ============================================================================
+// STATE
+// ============================================================================
+
+// 🔥 AJOUT v2.4 : Compteur pour forcer le rafraîchissement du computed
+const now = ref(Date.now())
+let interval = null
+
+// ============================================================================
+// COMPUTED
+// ============================================================================
+
+/**
+ * Temps relatif réactif
+ * 
+ * ✅ CORRIGÉ v2.4 : Se met à jour automatiquement toutes les 30 secondes
+ */
+const relativeTime = computed(() => {
+  return formatDate(props.conversation.updated_at, now.value)
+})
+
+// ============================================================================
+// LIFECYCLE
+// ============================================================================
+
+onMounted(() => {
+  // 🔥 AJOUT v2.4 : Rafraîchir le temps toutes les 30 secondes
+  interval = setInterval(() => {
+    now.value = Date.now()
+  }, 30000) // 30 secondes
+})
+
+onUnmounted(() => {
+  // Nettoyer l'interval
+  if (interval) {
+    clearInterval(interval)
+  }
+})
+
+// ============================================================================
 // METHODS
 // ============================================================================
 
 /**
- * Formater la date
+ * Formater la date en temps relatif
+ * 
+ * ✅ CORRIGÉ v2.4 : Accepte maintenant un timestamp "now" pour la réactivité
  */
-function formatDate(dateString) {
+function formatDate(dateString, nowTimestamp = Date.now()) {
   if (!dateString) return ''
   
   const date = new Date(dateString)
-  const now = new Date()
-  const diff = now - date
+  const diff = nowTimestamp - date.getTime()
   
   // Moins d'une minute
   if (diff < 60 * 1000) {
@@ -151,115 +193,101 @@ function handleCommand(command) {
 }
 </script>
 
-<style scoped lang="scss">
+<style scoped>
 .conversation-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  margin: 2px 8px;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 12px 16px;
   cursor: pointer;
-  transition: all 0.2s;
-  
-  &:hover {
-    background: var(--hover-bg);
-    
-    .item-actions {
-      opacity: 1;
-    }
-  }
-  
-  &.active {
-    background: var(--active-bg);
-    
-    .item-icon {
-      color: var(--primary-color);
-    }
-    
-    .item-title {
-      color: var(--primary-color);
-      font-weight: 600;
-    }
-  }
-  
-  &.archived {
-    opacity: 0.7;
-    
-    .item-title {
-      font-style: italic;
-    }
-  }
+  transition: all 0.2s ease;
+  border-radius: 8px;
+  margin-bottom: 4px;
 }
 
+.conversation-item:hover {
+  background-color: var(--bg-hover, #f5f5f5);
+}
+
+.conversation-item.active {
+  background-color: var(--primary-color-light, #e6f7ff);
+  border-left: 3px solid var(--primary-color, #1890ff);
+}
+
+.conversation-item.archived {
+  opacity: 0.6;
+}
+
+/* Icône */
 .item-icon {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: var(--support-card-bg);
-  color: var(--text-secondary);
-  
-  .el-icon {
-    font-size: 16px;
-  }
+  font-size: 20px;
+  color: var(--text-secondary, #666);
 }
 
+.conversation-item.active .item-icon {
+  color: var(--primary-color, #1890ff);
+}
+
+/* Contenu */
 .item-content {
   flex: 1;
-  min-width: 0; // Permet le text-overflow
-  
-  .item-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  
-  .item-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 2px;
-    font-size: 11px;
-    color: var(--text-tertiary);
-    
-    .item-count {
-      &::before {
-        content: '•';
-        margin-right: 8px;
-      }
-    }
-  }
+  min-width: 0;
+  overflow: hidden;
 }
 
+.item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary, #333);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-item.active .item-title {
+  color: var(--primary-color, #1890ff);
+}
+
+.item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary, #999);
+}
+
+.item-date {
+  white-space: nowrap;
+}
+
+.item-count {
+  white-space: nowrap;
+}
+
+.item-count::before {
+  content: '•';
+  margin-right: 8px;
+}
+
+/* Actions */
 .item-actions {
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.2s;
-  
-  .action-btn {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    color: var(--text-secondary);
-    
-    &:hover {
-      color: var(--primary-color);
-      background: var(--hover-bg);
-    }
-  }
+  transition: opacity 0.2s ease;
 }
 
-// Toujours visible sur mobile
-@media (max-width: 768px) {
-  .item-actions {
-    opacity: 1;
-  }
+.conversation-item:hover .item-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  color: var(--text-secondary, #666);
+}
+
+.action-btn:hover {
+  color: var(--primary-color, #1890ff);
 }
 </style>

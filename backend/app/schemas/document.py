@@ -1,5 +1,5 @@
 """Document schemas."""
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, field_serializer
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import uuid
@@ -99,6 +99,11 @@ class DocumentResponse(DocumentBase):
     processed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    
+    @field_serializer('uploaded_at', 'processed_at', 'created_at', 'updated_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     class Config:
         from_attributes = True
@@ -233,6 +238,11 @@ class DocumentStatusResponse(BaseModel):
     uploaded_at: datetime
     processed_at: Optional[datetime] = None
     
+    @field_serializer('uploaded_at', 'processed_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
+    
     class Config:
         json_schema_extra = {
             "example": {
@@ -310,6 +320,11 @@ class DocumentListItem(BaseModel):
     # Timestamps
     uploaded_at: datetime
     processed_at: Optional[datetime] = None
+    
+    @field_serializer('uploaded_at', 'processed_at')
+    def serialize_datetime(self, dt: Optional[datetime]) -> Optional[str]:
+        """Sérialise les datetime en ISO + Z."""
+        return dt.isoformat() + 'Z' if dt else None
     
     # Temps de traitement - AJOUTÉS
     extraction_time_seconds: Optional[float] = None
