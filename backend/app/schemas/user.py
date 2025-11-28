@@ -20,6 +20,28 @@ class UserBase(BaseModel):
     prenom: str = Field(..., min_length=1, max_length=100, description="Prénom")
     role: UserRole = Field(default=UserRole.USER, description="Rôle de l'utilisateur")
     is_active: bool = Field(default=True, description="Statut actif/inactif")
+    
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: str) -> str:
+        """
+        Valide que l'email appartient au domaine @beac.int.
+        
+        Args:
+            v: Adresse email à valider
+            
+        Returns:
+            str: Email validé
+            
+        Raises:
+            ValueError: Si le domaine n'est pas @beac.int
+        """
+        if not v.lower().endswith("@beac.int"):
+            raise ValueError(
+                "L'adresse email doit appartenir au domaine @beac.int. "
+                f"Email fourni: {v}"
+            )
+        return v.lower()  # Normaliser en minuscules
 
 
 # ============================================================================
@@ -51,6 +73,17 @@ class UserUpdate(BaseModel):
     prenom: Optional[str] = Field(None, min_length=1, max_length=100)
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: Optional[str]) -> Optional[str]:
+        """Valide que l'email appartient au domaine @beac.int."""
+        if v is not None and not v.lower().endswith("@beac.int"):
+            raise ValueError(
+                "L'adresse email doit appartenir au domaine @beac.int. "
+                f"Email fourni: {v}"
+            )
+        return v.lower() if v else None
 
 
 class UserImportRow(BaseModel):
@@ -62,6 +95,17 @@ class UserImportRow(BaseModel):
     prenom: str = Field(..., min_length=1, max_length=100)
     role: str = Field(default="USER", description="Rôle (ADMIN, MANAGER, USER)")
     password: str = Field(..., min_length=10, max_length=255, description="Mot de passe initial")
+    
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: str) -> str:
+        """Valide que l'email appartient au domaine @beac.int."""
+        if not v.lower().endswith("@beac.int"):
+            raise ValueError(
+                "L'adresse email doit appartenir au domaine @beac.int. "
+                f"Email fourni: {v}"
+            )
+        return v.lower()
     
     @field_validator("role")
     @classmethod
@@ -178,6 +222,17 @@ class ProfileUpdateRequest(BaseModel):
     nom: Optional[str] = Field(None, min_length=1, max_length=100, description="Nom de famille")
     prenom: Optional[str] = Field(None, min_length=1, max_length=100, description="Prénom")
     email: Optional[EmailStr] = Field(None, description="Adresse email")
+    
+    @field_validator("email")
+    @classmethod
+    def validate_email_domain(cls, v: Optional[str]) -> Optional[str]:
+        """Valide que l'email appartient au domaine @beac.int."""
+        if v is not None and not v.lower().endswith("@beac.int"):
+            raise ValueError(
+                "L'adresse email doit appartenir au domaine @beac.int. "
+                f"Email fourni: {v}"
+            )
+        return v.lower() if v else None
 
 
 class ForgotPasswordRequest(BaseModel):

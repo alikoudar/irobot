@@ -82,6 +82,7 @@ export const useUsersStore = defineStore('users', () => {
 
   /**
    * Créer un nouvel utilisateur
+   * 🔥 AMÉLIORATION : Messages d'erreur explicites pour validation email
    */
   async function createUser(userData) {
     isLoading.value = true
@@ -95,8 +96,37 @@ export const useUsersStore = defineStore('users', () => {
       ElMessage.success('Utilisateur créé avec succès')
       return true
     } catch (err) {
-      error.value = err.response?.data?.detail || 'Erreur lors de la création de l\'utilisateur'
-      ElMessage.error(error.value)
+      // 🔥 NOUVEAU : Détection spécifique erreur validation email
+      const errorDetail = err.response?.data?.detail
+      
+      if (typeof errorDetail === 'string') {
+        // Erreur simple (string)
+        if (errorDetail.includes('@beac.int') || errorDetail.includes('email') || errorDetail.includes('domaine')) {
+          error.value = '❌ L\'adresse email doit appartenir au domaine @beac.int (ex: prenom.nom@beac.int)'
+        } else {
+          error.value = errorDetail
+        }
+      } else if (Array.isArray(errorDetail)) {
+        // Erreur de validation Pydantic (array)
+        const emailError = errorDetail.find(e => 
+          e.loc && e.loc.includes('email') && 
+          (e.msg.includes('@beac.int') || e.msg.includes('domaine'))
+        )
+        
+        if (emailError) {
+          error.value = '❌ L\'adresse email doit appartenir au domaine @beac.int (ex: prenom.nom@beac.int)'
+        } else {
+          error.value = errorDetail[0]?.msg || 'Erreur lors de la création de l\'utilisateur'
+        }
+      } else {
+        error.value = 'Erreur lors de la création de l\'utilisateur'
+      }
+      
+      ElMessage.error({
+        message: error.value,
+        duration: 5000,
+        showClose: true
+      })
       return false
     } finally {
       isLoading.value = false
@@ -125,6 +155,7 @@ export const useUsersStore = defineStore('users', () => {
 
   /**
    * Mettre à jour un utilisateur
+   * 🔥 AMÉLIORATION : Messages d'erreur explicites pour validation email
    */
   async function updateUser(userId, userData) {
     isLoading.value = true
@@ -145,8 +176,35 @@ export const useUsersStore = defineStore('users', () => {
       ElMessage.success('Utilisateur mis à jour avec succès')
       return true
     } catch (err) {
-      error.value = err.response?.data?.detail || 'Erreur lors de la mise à jour de l\'utilisateur'
-      ElMessage.error(error.value)
+      // 🔥 NOUVEAU : Détection spécifique erreur validation email
+      const errorDetail = err.response?.data?.detail
+      
+      if (typeof errorDetail === 'string') {
+        if (errorDetail.includes('@beac.int') || errorDetail.includes('email') || errorDetail.includes('domaine')) {
+          error.value = '❌ L\'adresse email doit appartenir au domaine @beac.int (ex: prenom.nom@beac.int)'
+        } else {
+          error.value = errorDetail
+        }
+      } else if (Array.isArray(errorDetail)) {
+        const emailError = errorDetail.find(e => 
+          e.loc && e.loc.includes('email') && 
+          (e.msg.includes('@beac.int') || e.msg.includes('domaine'))
+        )
+        
+        if (emailError) {
+          error.value = '❌ L\'adresse email doit appartenir au domaine @beac.int (ex: prenom.nom@beac.int)'
+        } else {
+          error.value = errorDetail[0]?.msg || 'Erreur lors de la mise à jour de l\'utilisateur'
+        }
+      } else {
+        error.value = 'Erreur lors de la mise à jour de l\'utilisateur'
+      }
+      
+      ElMessage.error({
+        message: error.value,
+        duration: 5000,
+        showClose: true
+      })
       return false
     } finally {
       isLoading.value = false
@@ -155,6 +213,7 @@ export const useUsersStore = defineStore('users', () => {
 
   /**
    * Supprimer un utilisateur
+   * 🔥 AMÉLIORATION : Message explicite pour auto-suppression
    */
   async function deleteUser(userId) {
     isLoading.value = true
@@ -168,8 +227,22 @@ export const useUsersStore = defineStore('users', () => {
       ElMessage.success('Utilisateur supprimé avec succès')
       return true
     } catch (err) {
-      error.value = err.response?.data?.detail || 'Erreur lors de la suppression de l\'utilisateur'
-      ElMessage.error(error.value)
+      // 🔥 NOUVEAU : Détection spécifique auto-suppression
+      const errorDetail = err.response?.data?.detail || ''
+      
+      if (errorDetail.includes('propre compte') || errorDetail.includes('auto-suppression') || errorDetail.includes('yourself')) {
+        error.value = '❌ Vous ne pouvez pas supprimer votre propre compte. Veuillez demander à un autre administrateur de le faire.'
+      } else if (errorDetail.includes('dernier administrateur')) {
+        error.value = '❌ Impossible de supprimer le dernier administrateur actif. Il doit toujours y avoir au moins un administrateur.'
+      } else {
+        error.value = errorDetail || 'Erreur lors de la suppression de l\'utilisateur'
+      }
+      
+      ElMessage.error({
+        message: error.value,
+        duration: 5000,
+        showClose: true
+      })
       return false
     } finally {
       isLoading.value = false
@@ -208,6 +281,7 @@ export const useUsersStore = defineStore('users', () => {
 
   /**
    * Importer des utilisateurs depuis Excel
+   * 🔥 AMÉLIORATION : Messages détaillés pour erreurs validation
    */
   async function importExcel(file) {
     isLoading.value = true
@@ -222,15 +296,38 @@ export const useUsersStore = defineStore('users', () => {
       if (result.error_count === 0) {
         ElMessage.success(`${result.success_count} utilisateur(s) importé(s) avec succès`)
       } else {
-        ElMessage.warning(
-          `Import terminé : ${result.success_count} succès, ${result.error_count} erreur(s)`
+        // 🔥 NOUVEAU : Afficher détails des erreurs
+        const hasEmailErrors = result.errors?.some(e => 
+          e.error && (e.error.includes('@beac.int') || e.error.includes('email') || e.error.includes('domaine'))
         )
+        
+        if (hasEmailErrors) {
+          ElMessage.warning({
+            message: `Import terminé : ${result.success_count} succès, ${result.error_count} erreur(s).\n⚠️ Certains emails ne sont pas du domaine @beac.int`,
+            duration: 7000,
+            showClose: true,
+            dangerouslyUseHTMLString: false
+          })
+        } else {
+          ElMessage.warning(
+            `Import terminé : ${result.success_count} succès, ${result.error_count} erreur(s)`
+          )
+        }
+        
+        // Afficher les erreurs dans la console pour debug
+        if (result.errors && result.errors.length > 0) {
+          console.warn('📋 Erreurs d\'import détaillées:', result.errors)
+        }
       }
 
       return result
     } catch (err) {
       error.value = err.response?.data?.detail || 'Erreur lors de l\'import Excel'
-      ElMessage.error(error.value)
+      ElMessage.error({
+        message: error.value,
+        duration: 5000,
+        showClose: true
+      })
       return null
     } finally {
       isLoading.value = false

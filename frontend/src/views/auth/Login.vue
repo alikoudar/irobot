@@ -110,15 +110,16 @@ const handleLogin = async () => {
   await loginFormRef.value.validate(async (valid) => {
     if (!valid) return
 
-    const success = await authStore.login(loginForm.matricule, loginForm.password)
+    // 🔥 NOUVEAU : login retourne {success, redirectTo}
+    const result = await authStore.login(loginForm.matricule, loginForm.password)
 
-    if (success) {
+    if (result.success) {
+      // Vérifier si changement de mot de passe obligatoire
       if (authStore.mustChangePassword) {
         router.push('/change-password')
-      } else if (authStore.isAdmin) {
-        router.push('/admin/users')
       } else {
-        router.push('/chat')
+        // 🔥 NOUVEAU : Redirection automatique selon le rôle
+        router.push(result.redirectTo)
       }
     }
   })
@@ -128,10 +129,9 @@ onMounted(() => {
   if (authStore.isAuthenticated) {
     if (authStore.mustChangePassword) {
       router.push('/change-password')
-    } else if (authStore.isAdmin) {
-      router.push('/admin/users')
     } else {
-      router.push('/chat')
+      // 🔥 NOUVEAU : Utiliser getDefaultRoute() pour redirection automatique
+      router.push(authStore.getDefaultRoute())
     }
   }
 })

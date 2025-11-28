@@ -403,17 +403,13 @@ class DashboardService:
         Returns:
             Liste de dicts avec document_id, title, category, usage_count, total_chunks
         """
-        # CORRECTIF v1.2: MessageRole.ASSISTANT (enum en MAJUSCULES)
-        # Stratégie simplifiée : compter les chunks par document
-        query = db.query(
-            Chunk.document_id,
-            func.count(Chunk.id).label('usage_count')
-        ).join(
-            Message,
-            and_(
-                Message.sources.isnot(None),
-                Message.role == MessageRole.ASSISTANT
-            )
+        # Construire le mapping document_id -> usage_count
+        document_usage = {}
+        
+        # Récupérer tous les messages assistant avec sources
+        query = db.query(Message).filter(
+            Message.sources.isnot(None),
+            Message.role == MessageRole.ASSISTANT
         )
         
         if start_date:
@@ -421,15 +417,30 @@ class DashboardService:
         if end_date:
             query = query.filter(Message.created_at <= end_date)
         
-        results = query.group_by(
-            Chunk.document_id
-        ).order_by(
-            func.count(Chunk.id).desc()
-        ).limit(limit).all()
+        messages = query.all()
+        
+        # Parser les sources et compter les utilisations
+        # ✅ CORRECTIF v3.0: Compter 1 fois par message, pas par chunk
+        for message in messages:
+            if message.sources:
+                # Extraire les document_id UNIQUES de ce message
+                doc_ids_in_message = set()
+                for source in message.sources:
+                    if isinstance(source, dict):
+                        doc_id = source.get("document_id")
+                        if doc_id:
+                            doc_ids_in_message.add(doc_id)
+                
+                # Incrémenter 1 fois par document unique utilisé dans le message
+                for doc_id in doc_ids_in_message:
+                    document_usage[doc_id] = document_usage.get(doc_id, 0) + 1
+        
+        # Trier par usage_count décroissant et prendre le top N
+        sorted_docs = sorted(document_usage.items(), key=lambda x: x[1], reverse=True)[:limit]
         
         # Enrichir avec les détails des documents
         top_docs = []
-        for doc_id, usage_count in results:
+        for doc_id, usage_count in sorted_docs:
             document = db.query(Document).filter(Document.id == doc_id).first()
             if document:
                 top_docs.append({

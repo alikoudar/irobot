@@ -167,10 +167,10 @@ export const useChatStore = defineStore('chat', () => {
       const response = await api.get(`/chat/conversations/${conversationId}`)
       const data = response.data
       
-      currentConversation.value = data
+      currentConversation.value = data.conversation
       messages.value = data.messages || []
       
-      console.log('✅ Conversation chargée:', data.title)
+      console.log('✅ Conversation chargée:', data.conversation?.title)
       console.log('✅ Messages:', messages.value.length)
       console.log('🔍 [DEBUG] currentConversation.value.id:', currentConversation.value?.id)
       
@@ -329,144 +329,192 @@ export const useChatStore = defineStore('chat', () => {
    * @returns {Promise<Object|null>} Résultat
    */
   async function sendMessage(messageContent, conversationId = null) {
-    if (!messageContent?.trim() || isSending.value || isGenerating.value) {
-      return null
+  if (!messageContent?.trim() || isSending.value || isGenerating.value) {
+    return null
+  }
+  
+  isSending.value = true
+  isGenerating.value = true
+  
+  // ✅ CORRECTION : Prioriser conversationId passé en paramètre, sinon currentConversation
+  const convId = currentConversation.value?.id
+  
+  // 🔥 AJOUT Sprint 11 : Logs défensifs pour debug
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log('🔍 [DEBUG sendMessage] DÉBUT')
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.log('📝 Message:', messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''))
+  console.log('📌 Paramètre conversationId:', conversationId)
+  console.log('📌 currentConversation.value:', currentConversation.value)
+  console.log('📌 currentConversation.value?.id:', currentConversation.value?.id)
+  console.log('🎯 convId final:', convId)
+  
+  // ⚠️ AVERTISSEMENT si convId est null
+  if (!convId) {
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.warn('⚠️  ATTENTION : conversation_id est NULL !')
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.warn('   Une NOUVELLE conversation sera créée par le backend.')
+    console.warn('   Raisons possibles :')
+    console.warn('   1. conversationId paramètre est null/undefined')
+    console.warn('   2. currentConversation.value est null/undefined')
+    console.warn('   3. currentConversation.value.id est undefined')
+    console.warn('')
+    console.warn('   État actuel :')
+    console.warn('   - conversationId passé:', conversationId)
+    console.warn('   - currentConversation:', currentConversation.value)
+    console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  } else {
+    console.log('✅ conversation_id présent:', convId)
+    console.log('   Le message sera ajouté à la conversation existante')
+  }
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  
+  try {
+    console.log('📤 Envoi à /chat...')
+    
+    // Appel API simple (NON-STREAMING)
+    const response = await api.post('/chat', {
+      message: messageContent,
+      conversation_id: convId,  // ✅ Envoie bien le conversation_id
+      stream: false
+    })
+    
+    const data = response.data
+    
+    console.log('✅ Réponse reçue:', {
+      conversation_id: data.conversation_id,
+      message_id: data.message_id,
+      title: data.title,
+      content_length: data.content?.length
+    })
+    
+    // 🔥 VÉRIFICATION : Le backend a-t-il créé une nouvelle conversation ?
+    if (convId && data.conversation_id !== convId) {
+      console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+      console.warn('⚠️  INCOHÉRENCE DÉTECTÉE !')
+      console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+      console.warn('   conversation_id envoyé :', convId)
+      console.warn('   conversation_id reçu   :', data.conversation_id)
+      console.warn('   → Le backend a changé le conversation_id !')
+      console.warn('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    } else if (!convId && data.conversation_id) {
+      console.log('ℹ️  Nouvelle conversation créée par le backend')
+      console.log('   conversation_id:', data.conversation_id)
     }
     
-    isSending.value = true
-    isGenerating.value = true
-    
-    // ✅ CORRECTION : Prioriser conversationId passé en paramètre, sinon currentConversation
-    const convId = conversationId || currentConversation.value?.id
-    
-    console.log('🔍 [DEBUG] Avant envoi - convId:', convId)
-    console.log('🔍 [DEBUG] Avant envoi - currentConversation.value?.id:', currentConversation.value?.id)
-    
-    try {
-      console.log('📤 Envoi message:', messageContent.substring(0, 50))
-      console.log('🔍 [DEBUG] conversation_id envoyé:', convId)
+    // ✅ CRITIQUE : Mettre à jour currentConversation IMMÉDIATEMENT
+    if (data.conversation_id) {
+      // 🔥 CORRECTION #1 : TOUJOURS mettre à jour (même si même ID)
+      // Car le titre peut avoir changé (auto-généré par backend)
+      currentConversation.value = {
+        id: data.conversation_id,
+        title: data.title || 'Nouvelle conversation',
+        is_archived: false,
+        message_count: data.message_count || 2,
+        created_at: data.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
       
-      // Appel API simple (NON-STREAMING)
-      const response = await api.post('/chat', {
-        message: messageContent,
-        conversation_id: convId,  // ✅ Envoie bien le conversation_id
-        stream: false
+      console.log('🔄 currentConversation mis à jour:', {
+        id: currentConversation.value.id,
+        title: currentConversation.value.title
       })
-      
-      const data = response.data
-      
-      console.log('✅ Réponse reçue:', {
-        conversation_id: data.conversation_id,
-        message_id: data.message_id,
-        title: data.title,
-        content_length: data.content?.length
-      })
-      
-      // ✅ CRITIQUE : Mettre à jour currentConversation IMMÉDIATEMENT
-      if (data.conversation_id) {
-        // 🔥 CORRECTION #1 : TOUJOURS mettre à jour (même si même ID)
-        // Car le titre peut avoir changé (auto-généré par backend)
-        currentConversation.value = {
-          id: data.conversation_id,
-          title: data.title || 'Nouvelle conversation',
-          is_archived: false,
-          message_count: data.message_count || 2,
-          created_at: data.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString()
+    }
+    
+    // 🔥 CORRECTION #2 : Ne PAS recharger avec fetchConversation
+    // Car ça écrase currentConversation avec les anciennes données
+    // À la place, juste recharger les messages
+    if (data.conversation_id) {
+      try {
+        const messagesResponse = await api.get(`/chat/conversations/${data.conversation_id}`)
+        messages.value = messagesResponse.data.messages || []
+        
+        // Mettre à jour le titre SI le backend retourne un nouveau
+        if (messagesResponse.data.title && messagesResponse.data.title !== 'Nouvelle conversation') {
+          currentConversation.value.title = messagesResponse.data.title
         }
         
-        console.log('🔄 currentConversation mis à jour:', {
-          id: currentConversation.value.id,
-          title: currentConversation.value.title
-        })
+        console.log('✅ Messages rechargés:', messages.value.length)
+      } catch (err) {
+        console.error('❌ Erreur rechargement messages:', err)
       }
-      
-      // 🔥 CORRECTION #2 : Ne PAS recharger avec fetchConversation
-      // Car ça écrase currentConversation avec les anciennes données
-      // À la place, juste recharger les messages
-      if (data.conversation_id) {
-        try {
-          const messagesResponse = await api.get(`/chat/conversations/${data.conversation_id}`)
-          messages.value = messagesResponse.data.messages || []
-          
-          // Mettre à jour le titre SI le backend retourne un nouveau
-          if (messagesResponse.data.title && messagesResponse.data.title !== 'Nouvelle conversation') {
-            currentConversation.value.title = messagesResponse.data.title
-          }
-          
-          console.log('✅ Messages rechargés:', messages.value.length)
-        } catch (err) {
-          console.error('❌ Erreur rechargement messages:', err)
-        }
-      }
-      
-      // 🔥 CORRECTION #3 : Ajouter/Mettre à jour la conversation dans la liste
-      // Au lieu de TOUT recharger
-      const existingIndex = conversations.value.findIndex(c => c.id === data.conversation_id)
-      
-      if (existingIndex >= 0) {
-        // Conversation existe : mettre à jour
-        const newUpdatedAt = new Date().toISOString()
-        conversations.value[existingIndex] = {
-          ...conversations.value[existingIndex],
-          title: currentConversation.value.title,
-          updated_at: newUpdatedAt,
-          message_count: messages.value.length
-        }
-        console.log('📝 Conversation mise à jour dans la liste')
-        console.log('🔍 [DEBUG] updated_at mis à jour:', newUpdatedAt)
-      } else {
-        // Nouvelle conversation : ajouter en tête
-        const newUpdatedAt = new Date().toISOString()
-        conversations.value.unshift({
-          id: data.conversation_id,
-          title: currentConversation.value.title,
-          is_archived: false,
-          message_count: messages.value.length,
-          created_at: data.created_at || new Date().toISOString(),
-          updated_at: newUpdatedAt
-        })
-        total.value += 1
-        console.log('➕ Nouvelle conversation ajoutée à la liste')
-        console.log('🔍 [DEBUG] updated_at nouvelle conversation:', newUpdatedAt)
-      }
-      
-      // 🔥 PERSISTENCE : Sauvegarder l'ID de la conversation active
-      if (currentConversation.value?.id) {
-        try {
-          localStorage.setItem('irobot_current_conversation_id', currentConversation.value.id)
-          console.log('💾 Conversation ID sauvegardé:', currentConversation.value.id)
-        } catch (e) {
-          console.warn('Impossible de sauvegarder dans localStorage:', e)
-        }
-      }
-      
-      return {
-        success: true,
-        conversation_id: data.conversation_id,
-        message_id: data.message_id
-      }
-      
-    } catch (error) {
-      console.error('❌ Erreur envoi message:', error)
-      
-      let errorMessage = 'Erreur lors de l\'envoi du message'
-      
-      if (error.response?.data?.detail) {
-        errorMessage = error.response.data.detail
-      } else if (error.message) {
-        errorMessage = error.message
-      }
-      
-      ElMessage.error(errorMessage)
-      
-      return null
-      
-    } finally {
-      isSending.value = false
-      isGenerating.value = false
     }
+    
+    // 🔥 CORRECTION #3 : Ajouter/Mettre à jour la conversation dans la liste
+    // Au lieu de TOUT recharger
+    const existingIndex = conversations.value.findIndex(c => c.id === data.conversation_id)
+    
+    if (existingIndex >= 0) {
+      // Conversation existe : mettre à jour
+      const newUpdatedAt = new Date().toISOString()
+      conversations.value[existingIndex] = {
+        ...conversations.value[existingIndex],
+        title: currentConversation.value.title,
+        updated_at: newUpdatedAt,
+        message_count: messages.value.length
+      }
+      console.log('📝 Conversation mise à jour dans la liste')
+      console.log('🔍 [DEBUG] updated_at mis à jour:', newUpdatedAt)
+    } else {
+      // Nouvelle conversation : ajouter en tête
+      const newUpdatedAt = new Date().toISOString()
+      conversations.value.unshift({
+        id: data.conversation_id,
+        title: currentConversation.value.title,
+        is_archived: false,
+        message_count: messages.value.length,
+        created_at: data.created_at || new Date().toISOString(),
+        updated_at: newUpdatedAt
+      })
+      total.value += 1
+      console.log('➕ Nouvelle conversation ajoutée à la liste')
+      console.log('🔍 [DEBUG] updated_at nouvelle conversation:', newUpdatedAt)
+    }
+    
+    // 🔥 PERSISTENCE : Sauvegarder l'ID de la conversation active
+    if (currentConversation.value?.id) {
+      try {
+        localStorage.setItem('irobot_current_conversation_id', currentConversation.value.id)
+        console.log('💾 Conversation ID sauvegardé:', currentConversation.value.id)
+      } catch (e) {
+        console.warn('Impossible de sauvegarder dans localStorage:', e)
+      }
+    }
+    
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.log('✅ [DEBUG sendMessage] FIN - SUCCÈS')
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    
+    return {
+      success: true,
+      conversation_id: data.conversation_id,
+      message_id: data.message_id
+    }
+    
+  } catch (error) {
+    console.error('❌ Erreur envoi message:', error)
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    console.log('❌ [DEBUG sendMessage] FIN - ERREUR')
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+    
+    let errorMessage = 'Erreur lors de l\'envoi du message'
+    
+    if (error.response?.data?.detail) {
+      errorMessage = error.response.data.detail
+    } else if (error.message) {
+      errorMessage = error.message
+    }
+    
+    ElMessage.error(errorMessage)
+    
+    return null
+    
+  } finally {
+    isSending.value = false
+    isGenerating.value = false
   }
+}
   
   // ===========================================================================
   // ACTIONS - FEEDBACKS

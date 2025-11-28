@@ -33,10 +33,43 @@ export const useAuthStore = defineStore('auth', () => {
   // Actions
 
   /**
-   * Connexion utilisateur
+   * Obtenir la route par défaut selon le rôle de l'utilisateur
+   * 
+   * ADMIN → /admin/dashboard
+   * MANAGER → /documents (Ingestion)
+   * USER → /chat
+   * 
+   * @returns {string} Chemin de la route
+   */
+  function getDefaultRoute() {
+    if (!currentUser.value) {
+      return '/login'
+    }
+    
+    const role = currentUser.value.role
+    
+    switch (role) {
+      case 'ADMIN':
+        return '/admin/dashboard'
+      
+      case 'MANAGER':
+        return '/documents'  // Page d'ingestion
+      
+      case 'USER':
+        return '/chat'
+      
+      default:
+        // Fallback si le rôle est inconnu
+        console.warn(`Rôle inconnu: ${role}, redirection vers /chat`)
+        return '/chat'
+    }
+  }
+
+  /**
+   * Connexion utilisateur avec redirection automatique par rôle
    * @param {string} matricule - Matricule de l'utilisateur
    * @param {string} password - Mot de passe
-   * @returns {Promise<boolean>} Succès de la connexion
+   * @returns {Promise<{success: boolean, redirectTo?: string}>} Résultat avec route de redirection
    */
   async function login(matricule, password) {
     isLoading.value = true
@@ -63,12 +96,23 @@ export const useAuthStore = defineStore('auth', () => {
       console.log('🔄 Chat store réinitialisé après login')
       // =====================================================================
 
+      // 🔥 NOUVEAU : Obtenir la route par défaut selon le rôle
+      const redirectTo = getDefaultRoute()
+      
+      console.log(`✅ Connexion réussie - Rôle: ${data.user.role} - Redirection: ${redirectTo}`)
       ElMessage.success('Connexion réussie')
-      return true
+      
+      // 🔥 NOUVEAU : Retourner success ET redirectTo
+      return {
+        success: true,
+        redirectTo
+      }
     } catch (err) {
       error.value = err.response?.data?.detail || 'Erreur de connexion'
       ElMessage.error(error.value)
-      return false
+      return {
+        success: false
+      }
     } finally {
       isLoading.value = false
     }
@@ -276,6 +320,9 @@ export const useAuthStore = defineStore('auth', () => {
     initialize,
     hasRole,
     canAccessAdmin,
-    canManageDocuments
+    canManageDocuments,
+    
+    // 🔥 NOUVEAU : Route par défaut selon le rôle
+    getDefaultRoute
   }
 })

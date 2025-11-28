@@ -221,11 +221,13 @@ import {
   Clock, Download, Upload, Connection
 } from '@element-plus/icons-vue'
 import { useUsersStore } from '@/stores/users'
+import { useAuthStore } from '@/stores/auth'  // 🔥 NOUVEAU : Pour vérifier auto-suppression
 import UserForm from '@/components/forms/UserForm.vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import StatCard from '@/components/common/StatCard.vue'
 
 const usersStore = useUsersStore()
+const authStore = useAuthStore()  // 🔥 NOUVEAU : Store auth pour vérifier identité
 const uploadRef = ref(null)
 
 const showUserForm = ref(false)
@@ -259,6 +261,16 @@ const handleSubmitUser = async (userData) => {
 
 const handleDelete = async (user) => {
   try {
+    // 🔥 NOUVEAU : Vérifier auto-suppression AVANT l'appel backend
+    if (authStore.currentUser && user.id === authStore.currentUser.id) {
+      ElMessage.warning({
+        message: '❌ Vous ne pouvez pas supprimer votre propre compte. Veuillez demander à un autre administrateur de le faire.',
+        duration: 5000,
+        showClose: true
+      })
+      return  // Arrêter ici, ne pas appeler le backend
+    }
+    
     await ElMessageBox.confirm(
       `Êtes-vous sûr de vouloir supprimer l'utilisateur ${user.prenom} ${user.nom} ?`,
       'Confirmation de suppression',

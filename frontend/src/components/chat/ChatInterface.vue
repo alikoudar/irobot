@@ -21,13 +21,16 @@
 
 <script setup>
 /**
- * ChatInterface.vue
+ * ChatInterface.vue - ✅ CORRIGÉ Sprint 11
  * 
  * Interface principale du chatbot combinant :
  * - Sidebar des conversations (gauche)
  * - Fenêtre de chat (droite)
  * 
+ * ✅ CORRECTIF : Passe explicitement conversation_id à sendMessage
+ * 
  * Sprint 8 - Phase 2 : Composants Chat
+ * Sprint 11 - Correction conversation_id
  */
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -133,10 +136,19 @@ function handleNewConversation() {
 
 /**
  * Envoyer un message
+ * 
+ * ✅ CORRECTIF Sprint 11 v2 : Lecture dynamique de conversation_id
+ * Le store lit directement currentConversation.value?.id au moment de l'envoi
  */
 async function handleSendMessage(message) {
   if (!message?.trim()) return
   
+  // ✅ SIMPLIFICATION : Ne plus capturer l'ID ici
+  // Le store lira currentConversation.value?.id directement
+  console.log('🔍 [handleSendMessage] Envoi message...')
+  console.log('🔍 [handleSendMessage] Conversation active:', chatStore.currentConversation?.id)
+  
+  // ✅ SIMPLIFICATION : Ne plus passer conversationId en paramètre
   await chatStore.sendMessage(message)
   
   // Recharger les conversations pour avoir le nouveau titre

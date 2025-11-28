@@ -82,6 +82,10 @@
               <el-icon><CollectionTag /></el-icon>
               <template #title>Catégories</template>
             </el-menu-item>
+            <el-menu-item index="/manager/dashboard">
+              <el-icon><PieChart /></el-icon>
+              <template #title>Dashboard</template>
+            </el-menu-item>
           </el-sub-menu>
 
           <!-- ============================================================ -->
@@ -268,6 +272,7 @@ import {
   CaretBottom,
   Lock,
   SwitchButton,
+  PieChart,
   DArrowLeft,
   DArrowRight,
   InfoFilled,
