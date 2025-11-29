@@ -106,12 +106,8 @@
               <template #title>Utilisateurs</template>
             </el-menu-item>
             <el-menu-item index="/admin/dashboard">
-              <el-icon><Monitor /></el-icon>
-              <template #title>Dashboard</template>
-            </el-menu-item>
-            <el-menu-item index="/admin/stats">
               <el-icon><TrendCharts /></el-icon>
-              <template #title>Statistiques</template>
+              <template #title>Dashboard</template>
             </el-menu-item>
             <el-menu-item index="/admin/feedbacks">
               <el-icon><ChatLineSquare /></el-icon>

@@ -47,7 +47,7 @@
         <el-col :span="8">
           <StatsCard
             title="Documents Traités"
-            :value="stats.documents?.completed || 0"
+            :value="animatedStats.docsCompleted.displayValue.value"
             :total="stats.documents?.total || 0"
             icon="Document"
             color="#67C23A"
@@ -57,7 +57,7 @@
         <el-col :span="8">
           <StatsCard
             title="Messages Générés"
-            :value="stats.messages?.total || 0"
+            :value="animatedStats.messagesTotal.displayValue.value"
             subtitle="Utilisant mes documents"
             icon="ChatDotRound"
             color="#409EFF"
@@ -67,8 +67,8 @@
         <el-col :span="8">
           <StatsCard
             title="Taux de Complétion"
-            :value="`${documentCompletionRate}%`"
-            :subtitle="`${stats.documents?.processing || 0} en cours`"
+            :value="`${animatedStats.completionRate.displayValue.value}%`"
+            :subtitle="`${animatedStats.docsProcessing.displayValue.value} en cours`"
             icon="CircleCheckFilled"
             :color="getCompletionColor(documentCompletionRate)"
           />
@@ -131,22 +131,22 @@
             </template>
             <el-descriptions :column="3" border>
               <el-descriptions-item label="Total Documents">
-                {{ stats.documents?.total || 0 }}
+                {{ animatedStats.docsTotal.displayValue.value }}
               </el-descriptions-item>
               <el-descriptions-item label="Documents Complétés">
-                {{ stats.documents?.completed || 0 }}
+                {{ animatedStats.docsCompleted.displayValue.value }}
               </el-descriptions-item>
               <el-descriptions-item label="Documents en Traitement">
-                {{ stats.documents?.processing || 0 }}
+                {{ animatedStats.docsProcessing.displayValue.value }}
               </el-descriptions-item>
               <el-descriptions-item label="Documents Échoués">
-                {{ stats.documents?.failed || 0 }}
+                {{ animatedStats.docsFailed.displayValue.value }}
               </el-descriptions-item>
               <el-descriptions-item label="Total Chunks">
-                {{ stats.documents?.total_chunks || 0 }}
+                {{ animatedStats.totalChunks.displayValue.value }}
               </el-descriptions-item>
               <el-descriptions-item label="Messages Générés">
-                {{ stats.messages?.total || 0 }}
+                {{ animatedStats.messagesTotal.displayValue.value }}
               </el-descriptions-item>
             </el-descriptions>
           </el-card>
@@ -176,6 +176,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import { useManagerDashboardStore } from '@/stores/managerDashboard'
 import StatsCard from '@/components/dashboard/StatsCard.vue'
 import { ElMessage } from 'element-plus'
+import { useCountAnimation } from '@/composables/useCountAnimation'
 
 // Register Chart.js components
 ChartJS.register(
@@ -205,6 +206,20 @@ const timeline = computed(() => managerStore.timeline)
 const loading = computed(() => managerStore.loading)
 const error = computed(() => managerStore.error)
 const documentCompletionRate = computed(() => managerStore.documentCompletionRate)
+
+// ✨ ANIMATIONS - Créer des animations pour toutes les valeurs numériques
+const animatedStats = {
+  // KPI Cards (value seulement, pas total pour barres de progression)
+  docsCompleted: useCountAnimation(computed(() => stats.value?.documents?.completed || 0)),
+  docsProcessing: useCountAnimation(computed(() => stats.value?.documents?.processing || 0)),
+  messagesTotal: useCountAnimation(computed(() => stats.value?.messages?.total || 0)),
+  completionRate: useCountAnimation(computed(() => documentCompletionRate.value || 0), 1500, 0),
+  
+  // Récapitulatif (animer pour le tableau el-descriptions)
+  docsTotal: useCountAnimation(computed(() => stats.value?.documents?.total || 0)),
+  docsFailed: useCountAnimation(computed(() => stats.value?.documents?.failed || 0)),
+  totalChunks: useCountAnimation(computed(() => stats.value?.documents?.total_chunks || 0))
+}
 
 // Methods
 const fetchStats = async () => {

@@ -48,7 +48,7 @@
         <el-col :span="6">
           <StatsCard
             title="Utilisateurs Actifs"
-            :value="stats.users?.active || 0"
+            :value="animatedStats.usersActive.displayValue.value"
             :total="stats.users?.total || 0"
             icon="User"
             color="#409EFF"
@@ -58,7 +58,7 @@
         <el-col :span="6">
           <StatsCard
             title="Documents Traités"
-            :value="stats.documents?.completed || 0"
+            :value="animatedStats.docsCompleted.displayValue.value"
             :total="stats.documents?.total || 0"
             icon="Document"
             color="#67C23A"
@@ -68,7 +68,7 @@
         <el-col :span="6">
           <StatsCard
             title="Messages"
-            :value="stats.messages?.total || 0"
+            :value="animatedStats.messagesTotal.displayValue.value"
             subtitle="Total messages"
             icon="ChatDotRound"
             color="#E6A23C"
@@ -78,7 +78,7 @@
         <el-col :span="6">
           <StatsCard
             title="Taux de Satisfaction"
-            :value="`${stats.feedbacks?.satisfaction_rate || 0}%`"
+            :value="`${animatedStats.satisfactionRate.displayValue.value}%`"
             subtitle="Feedbacks positifs"
             icon="CircleCheckFilled"
             :color="getSatisfactionColor(stats.feedbacks?.satisfaction_rate)"
@@ -98,7 +98,7 @@
           <el-col :span="8">
             <el-statistic
               title="Taux de Hit"
-              :value="stats.cache?.hit_rate || 0"
+              :value="animatedStats.cacheHitRate.displayValue.value"
               suffix="%"
             >
               <template #prefix>
@@ -110,7 +110,7 @@
           <el-col :span="8">
             <el-statistic
               title="Tokens Économisés"
-              :value="stats.cache?.tokens_saved || 0"
+              :value="animatedStats.tokensSaved.displayValue.value"
               :precision="0"
             >
               <template #prefix>
@@ -122,7 +122,7 @@
           <el-col :span="8">
             <el-statistic
               title="Coûts Économisés"
-              :value="stats.cache?.cost_saved_usd || 0"
+              :value="animatedStats.costSavedUSD.displayValue.value"
               prefix="$"
               :precision="2"
             />
@@ -130,9 +130,9 @@
         </el-row>
         
         <div class="cache-details">
-          <p>Cache Hits: <strong>{{ stats.cache?.cache_hits || 0 }}</strong></p>
-          <p>Cache Misses: <strong>{{ stats.cache?.cache_misses || 0 }}</strong></p>
-          <p>Économie XAF: <strong>{{ formatXAF(stats.cache?.cost_saved_xaf) }}</strong></p>
+          <p>Cache Hits: <strong>{{ animatedStats.cacheHits.displayValue.value }}</strong></p>
+          <p>Cache Misses: <strong>{{ animatedStats.cacheMisses.displayValue.value }}</strong></p>
+          <p>Économie XAF: <strong>{{ formatXAF(animatedStats.costSavedXAF.displayValue.value) }}</strong></p>
         </div>
       </el-card>
       
@@ -170,14 +170,14 @@
             <el-col :span="8">
               <el-statistic
                 title="Tokens Total"
-                :value="stats.tokens?.total?.total_tokens || 0"
+                :value="animatedStats.tokensTotal.displayValue.value"
                 :precision="0"
               />
             </el-col>
             <el-col :span="8">
               <el-statistic
                 title="Coût Total USD"
-                :value="stats.tokens?.total?.total_cost_usd || 0"
+                :value="animatedStats.totalCostUSD.displayValue.value"
                 prefix="$"
                 :precision="2"
               />
@@ -185,7 +185,7 @@
             <el-col :span="8">
               <el-statistic
                 title="Coût Total XAF"
-                :value="stats.tokens?.total?.total_cost_xaf || 0"
+                :value="animatedStats.totalCostXAF.displayValue.value"
                 suffix=" FCFA"
                 :precision="2"
               />
@@ -257,7 +257,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Line, Pie, Bar } from 'vue-chartjs'
 import {
   Chart as ChartJS,
@@ -276,6 +276,7 @@ import { Refresh, Download, CircleCheck, Coin } from '@element-plus/icons-vue'
 import { useDashboardStore } from '@/stores/dashboard'
 import StatsCard from '@/components/dashboard/StatsCard.vue'
 import { ElMessage } from 'element-plus'
+import { useCountAnimation } from '@/composables/useCountAnimation'
 
 // Register Chart.js components
 ChartJS.register(
@@ -306,37 +307,60 @@ const userActivityData = computed(() => dashboardStore.userActivity)
 const loading = computed(() => dashboardStore.loading)
 const error = computed(() => dashboardStore.error)
 
-// Methods
-const fetchStats = async () => {
+// ✨ ANIMATIONS - Créer des animations pour toutes les valeurs numériques
+const animatedStats = {
+  // KPI Cards (value seulement, pas total pour barres de progression)
+  usersActive: useCountAnimation(computed(() => stats.value?.users?.active || 0)),
+  docsCompleted: useCountAnimation(computed(() => stats.value?.documents?.completed || 0)),
+  messagesTotal: useCountAnimation(computed(() => stats.value?.messages?.total || 0)),
+  satisfactionRate: useCountAnimation(computed(() => stats.value?.feedbacks?.satisfaction_rate || 0), 1500, 0),
+  
+  // Cache Stats
+  cacheHitRate: useCountAnimation(computed(() => stats.value?.cache?.hit_rate || 0), 1500, 1),
+  tokensSaved: useCountAnimation(computed(() => stats.value?.cache?.tokens_saved || 0)),
+  costSavedUSD: useCountAnimation(computed(() => stats.value?.cache?.cost_saved_usd || 0), 1500, 2),
+  cacheHits: useCountAnimation(computed(() => stats.value?.cache?.cache_hits || 0)),
+  cacheMisses: useCountAnimation(computed(() => stats.value?.cache?.cache_misses || 0)),
+  costSavedXAF: useCountAnimation(computed(() => stats.value?.cache?.cost_saved_xaf || 0), 1500, 0),
+  
+  // Token Stats Totals
+  tokensTotal: useCountAnimation(computed(() => stats.value?.tokens?.total?.total_tokens || 0)),
+  totalCostUSD: useCountAnimation(computed(() => stats.value?.tokens?.total?.total_cost_usd || 0), 1500, 2),
+  totalCostXAF: useCountAnimation(computed(() => stats.value?.tokens?.total?.total_cost_xaf || 0), 1500, 2)
+}
+
+// Date Range Helpers
+const getDateRange = () => {
+  const now = new Date()
   let startDate, endDate
-  
-  switch (selectedPeriod.value) {
-    case 'today':
-      startDate = new Date()
-      startDate.setHours(0, 0, 0, 0)
-      endDate = new Date()
-      break
-    case '7days':
-      startDate = new Date()
-      startDate.setDate(startDate.getDate() - 7)
-      endDate = new Date()
-      break
-    case '30days':
-      startDate = new Date()
-      startDate.setDate(startDate.getDate() - 30)
-      endDate = new Date()
-      break
-    case 'custom':
-      if (!customDateRange.value || customDateRange.value.length !== 2) {
-        ElMessage.warning('Veuillez sélectionner une plage de dates')
-        return
-      }
-      startDate = customDateRange.value[0]
-      endDate = customDateRange.value[1]
-      break
+
+  if (selectedPeriod.value === 'custom') {
+    if (!customDateRange.value || customDateRange.value.length !== 2) {
+      return { startDate: null, endDate: null }
+    }
+    startDate = customDateRange.value[0]
+    endDate = customDateRange.value[1]
+  } else {
+    endDate = now
+    
+    const start = new Date()
+    if (selectedPeriod.value === 'today') {
+      start.setHours(0, 0, 0, 0)
+    } else if (selectedPeriod.value === '7days') {
+      start.setDate(start.getDate() - 7)
+    } else {
+      start.setDate(start.getDate() - 30)
+    }
+    startDate = start
   }
-  
+
+  return { startDate, endDate }
+}
+
+const fetchStats = async () => {
   try {
+    const { startDate, endDate } = getDateRange()
+    
     await Promise.all([
       dashboardStore.fetchStats(startDate, endDate),
       dashboardStore.fetchTopDocuments(10, startDate, endDate),

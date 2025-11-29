@@ -118,12 +118,6 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresManager: true }
     },
     {
-      path: '/admin/stats',
-      name: 'admin-stats',
-      component: () => import('../views/Home.vue'),
-      meta: { requiresAuth: true, requiresAdmin: true }
-    },
-    {
       path: '/admin/feedbacks',
       name: 'admin-feedbacks',
       component: () => import('../views/admin/AdminFeedbacks.vue'),
@@ -138,7 +132,7 @@ const router = createRouter({
     {
       path: '/admin/config',
       name: 'admin-config',
-      component: () => import('../views/Home.vue'),
+      component: () => import('../views/admin/Config.vue'),
       meta: { requiresAuth: true, requiresAdmin: true }
     }
   ]
