@@ -11,15 +11,22 @@ Le paramètre alpha contrôle le ratio : alpha=0.75 signifie 75% sémantique, 25
 MODIFICATION: Les configurations (alpha, top_k) sont lues depuis la DB via ConfigService.
 
 Sprint 6 - Phase 2 : Retriever & Reranker
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour les recherches
 """
 
 import logging
+import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_search_request,
+)
 
 # Configuration du logger
 logger = logging.getLogger(__name__)
@@ -161,6 +168,8 @@ class HybridRetriever:
     
     Les configurations (alpha, top_k) sont lues dynamiquement depuis la DB.
     
+    SPRINT 13: Les recherches sont maintenant instrumentées avec Prometheus.
+    
     Attributes:
         weaviate_client: Client Weaviate pour les requêtes
         mistral_client: Client Mistral pour l'embedding des questions
@@ -219,6 +228,10 @@ class HybridRetriever:
         """
         Effectue une recherche hybride dans Weaviate.
         
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - irobot_search_requests_total
+        - irobot_search_duration_seconds
+        
         Args:
             query: Question de l'utilisateur
             top_k: Nombre de résultats à retourner (défaut: depuis DB)
@@ -234,28 +247,31 @@ class HybridRetriever:
             ValueError: Si la query est vide
             Exception: Si erreur lors de la recherche
         """
-        # Validation
-        if not query or not query.strip():
-            raise ValueError("La question ne peut pas être vide")
-        
-        query = query.strip()
-        
-        # Récupérer les configs depuis la DB si non spécifiées
-        if top_k is None:
-            top_k = get_search_top_k()
-        if alpha is None:
-            alpha = get_search_alpha()
-        
-        logger.info(f"Recherche hybride - Query: '{query[:50]}...', top_k={top_k}, alpha={alpha}")
+        # SPRINT 13 - Monitoring : Mesurer la durée totale
+        start_time = time.time()
         
         try:
-            # Étape 1: Embedding de la question
+            # Validation
+            if not query or not query.strip():
+                raise ValueError("La question ne peut pas être vide")
+            
+            query = query.strip()
+            
+            # Récupérer les configs depuis la DB si non spécifiées
+            if top_k is None:
+                top_k = get_search_top_k()
+            if alpha is None:
+                alpha = get_search_alpha()
+            
+            logger.info(f"Recherche hybride - query='{query[:50]}...', top_k={top_k}, alpha={alpha}")
+            
+            # Générer l'embedding de la question
             query_embedding = await self._embed_query(query)
             
-            # Étape 2: Construction des filtres
+            # Construire les filtres
             filters = self._build_filters(category_filter, document_ids_filter)
             
-            # Étape 3: Recherche hybride dans Weaviate
+            # Exécuter la recherche hybride dans Weaviate
             raw_results = await self._execute_hybrid_search(
                 query=query,
                 query_embedding=query_embedding,
@@ -264,15 +280,32 @@ class HybridRetriever:
                 filters=filters
             )
             
-            # Étape 4: Conversion et filtrage des résultats
-            chunks = self._process_results(raw_results, min_score)
+            # Traiter et filtrer les résultats
+            results = self._process_results(raw_results, min_score)
             
-            logger.info(f"Recherche terminée - {len(chunks)} chunks trouvés")
+            # SPRINT 13 - Monitoring : Enregistrer les métriques
+            duration = time.time() - start_time
+            record_search_request(
+                search_type="hybrid",
+                duration=duration
+            )
             
-            return chunks
+            logger.info(
+                f"Recherche terminée - {len(results)} chunks trouvés, "
+                f"{duration:.3f}s"
+            )
+            
+            return results
             
         except Exception as e:
-            logger.error(f"Erreur lors de la recherche hybride: {str(e)}")
+            # SPRINT 13 - Monitoring : Enregistrer quand même la durée en cas d'erreur
+            duration = time.time() - start_time
+            record_search_request(
+                search_type="hybrid",
+                duration=duration
+            )
+            
+            logger.error(f"Erreur recherche hybride: {str(e)}")
             raise
     
     async def search_with_embedding(
@@ -285,30 +318,35 @@ class HybridRetriever:
         min_score: float = 0.0
     ) -> List[RetrievedChunk]:
         """
-        Recherche hybride avec un embedding déjà calculé.
+        Effectue une recherche hybride avec un embedding pré-calculé.
         
-        Utile quand l'embedding a déjà été calculé pour le cache L2.
+        Utile pour éviter de recalculer l'embedding si déjà disponible (ex: depuis le cache).
+        
+        SPRINT 13: Enregistre les métriques Prometheus.
         
         Args:
-            query: Question de l'utilisateur
-            query_embedding: Vecteur embedding de la question
-            top_k: Nombre de résultats
+            query: Question de l'utilisateur (pour BM25)
+            query_embedding: Vecteur embedding pré-calculé
+            top_k: Nombre de résultats à retourner
             alpha: Ratio hybride
-            category_filter: Filtre catégorie
+            category_filter: Filtrer par catégorie
             min_score: Score minimum
         
         Returns:
             Liste de RetrievedChunk
         """
-        # Récupérer les configs depuis la DB si non spécifiées
-        if top_k is None:
-            top_k = get_search_top_k()
-        if alpha is None:
-            alpha = get_search_alpha()
-        
-        logger.info(f"Recherche avec embedding fourni - top_k={top_k}, alpha={alpha}")
+        # SPRINT 13 - Monitoring : Mesurer la durée
+        start_time = time.time()
         
         try:
+            # Récupérer les configs si non spécifiées
+            if top_k is None:
+                top_k = get_search_top_k()
+            if alpha is None:
+                alpha = get_search_alpha()
+            
+            logger.info(f"Recherche avec embedding fourni - top_k={top_k}, alpha={alpha}")
+            
             filters = self._build_filters(category_filter, None)
             
             raw_results = await self._execute_hybrid_search(
@@ -319,15 +357,33 @@ class HybridRetriever:
                 filters=filters
             )
             
-            return self._process_results(raw_results, min_score)
+            results = self._process_results(raw_results, min_score)
+            
+            # SPRINT 13 - Monitoring : Enregistrer les métriques
+            duration = time.time() - start_time
+            record_search_request(
+                search_type="hybrid",
+                duration=duration
+            )
+            
+            return results
             
         except Exception as e:
+            # SPRINT 13 - Monitoring : Enregistrer quand même la durée
+            duration = time.time() - start_time
+            record_search_request(
+                search_type="hybrid",
+                duration=duration
+            )
+            
             logger.error(f"Erreur recherche avec embedding: {str(e)}")
             raise
     
     async def _embed_query(self, query: str) -> List[float]:
         """
         Génère l'embedding de la question via Mistral.
+        
+        Note: Les métriques d'embedding sont déjà enregistrées par mistral_client.
         
         Args:
             query: Question à embedder
@@ -398,6 +454,8 @@ class HybridRetriever:
         """
         Exécute la recherche hybride dans Weaviate.
         
+        Note: Les métriques Weaviate sont déjà enregistrées par weaviate_client.
+        
         Args:
             query: Question (pour BM25)
             query_embedding: Vecteur (pour recherche vectorielle)
@@ -421,7 +479,7 @@ class HybridRetriever:
             "upload_date"
         ]
         
-        # Appel à Weaviate
+        # Appel à Weaviate (métriques déjà enregistrées dans weaviate_client)
         results = await self.weaviate_client.hybrid_search(
             collection_name=self.collection_name,
             query=query,

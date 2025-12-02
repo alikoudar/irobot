@@ -1,0 +1,75 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    cluster: 'irobot-dev'
+    environment: 'development'
+
+# Configuration des alertes
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Chargement des règles d'alerting
+rule_files:
+  - 'alerts.yml'
+
+# Configuration des jobs de scraping
+scrape_configs:
+  # Prometheus lui-même
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Backend FastAPI
+  - job_name: 'irobot-backend'
+    metrics_path: '/v1/metrics'  # ← CORRIGÉ : /v1/metrics au lieu de /metrics
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: 'backend'
+          app: 'fastapi'
+
+  # Weaviate (métriques natives si disponibles)
+  - job_name: 'weaviate'
+    metrics_path: '/v1/metrics'
+    static_configs:
+      - targets: ['weaviate:8080']
+        labels:
+          service: 'weaviate'
+
+  # ==================== DOCKER SERVICE DISCOVERY ====================
+  # Découverte automatique des conteneurs Docker
+  # IMPORTANT: Nécessite le montage du socket Docker dans docker-compose.override.yml
+  # NOTE: La version de l'API Docker est négociée automatiquement par Prometheus
+  
+  # Découverte des conteneurs backend
+  - job_name: 'docker-backend'
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+        filters:
+          - name: 'label'
+            values: ['service=backend']
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        target_label: container_name
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: compose_service
+
+  # Découverte de tous les conteneurs Docker (monitoring général)
+  - job_name: 'docker-containers'
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        regex: '/(.+)'
+        target_label: container_name
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: compose_service
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        target_label: compose_project

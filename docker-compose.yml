@@ -83,6 +83,12 @@ services:
         condition: service_healthy
     networks:
       - irobot-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=backend"
 
   # ==================== CELERY WORKERS ====================
   celery-worker-processing:
@@ -102,6 +108,12 @@ services:
     restart: unless-stopped
     networks:
       - irobot-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=celery-processing"
 
   celery-worker-chunking:
     build:
@@ -119,6 +131,12 @@ services:
     restart: unless-stopped
     networks:
       - irobot-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=celery-chunking"
 
   celery-worker-embedding:
     build:
@@ -136,6 +154,12 @@ services:
     restart: unless-stopped
     networks:
       - irobot-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=celery-embedding"
 
   celery-worker-indexing:
     build:
@@ -154,6 +178,12 @@ services:
     restart: unless-stopped
     networks:
       - irobot-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=celery-indexing"
 
   celery-beat:
     build:
@@ -171,6 +201,12 @@ services:
     restart: unless-stopped
     networks:
       - irobot-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=celery-beat"
 
   flower:
     build:
@@ -218,14 +254,133 @@ services:
     depends_on:
       - backend
       - frontend
+      - grafana
+      - prometheus
     networks:
       - irobot-network
+
+  # ==================== MONITORING & OBSERVABILITY ====================
+  
+  # Prometheus - Collecte de métriques
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: irobot-prometheus-dev
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=90d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus_data_dev:/prometheus
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    user: root
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    networks:
+      - irobot-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Grafana - Dashboards et visualisation
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: irobot-grafana-dev
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_INSTALL_PLUGINS=redis-datasource,grafana-clock-panel
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data_dev:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+    networks:
+      - irobot-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Loki - Agrégation de logs
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: irobot-loki-dev
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./monitoring/loki:/etc/loki
+      - loki_data_dev:/loki
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+    networks:
+      - irobot-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Promtail - Agent de collecte de logs pour Loki
+  promtail:
+    image: grafana/promtail:3.2.0
+    container_name: irobot-promtail-dev
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./monitoring/loki:/etc/promtail
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - irobot-network
+
+  # Phoenix - Traces RAG et observabilité LLM
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: irobot-phoenix-dev
+    environment:
+      - PHOENIX_SQL_DATABASE_URL=sqlite:////data/phoenix.db
+      - PHOENIX_WORKING_DIR=/data
+    volumes:
+      - phoenix_data_dev:/data
+    ports:
+      - "6006:6006"
+    restart: unless-stopped
+    networks:
+      - irobot-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6006/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres_data_dev:
   redis_data_dev:
   weaviate_data_dev:
   uploads_dev:
+  prometheus_data_dev:
+  grafana_data_dev:
+  loki_data_dev:
+  phoenix_data_dev:
 
 networks:
   irobot-network:

@@ -9,6 +9,7 @@ Ce service gère le cache à 2 niveaux pour les requêtes du chatbot :
 Les configurations (TTL, seuil similarité) sont lues depuis la DB via ConfigService.
 
 Sprint 6 - Phase 3 : Cache Service
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour le cache
 """
 
 import logging
@@ -25,6 +26,13 @@ from app.db.session import SessionLocal
 from app.models.query_cache import QueryCache
 from app.models.cache_document_map import CacheDocumentMap
 from app.models.cache_statistics import CacheStatistics
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_cache_operation,
+    update_cache_hit_rate,
+    update_cache_entries_total,
+)
 
 # Configuration du logger
 logger = logging.getLogger(__name__)
@@ -145,6 +153,8 @@ class CacheService:
     - L2 : Similarité sémantique (cosine > seuil configurable)
     
     Les configurations sont lues depuis la DB via ConfigService.
+    
+    SPRINT 13: Toutes les opérations sont maintenant instrumentées avec Prometheus.
     """
     
     def __init__(self):
@@ -220,6 +230,8 @@ class CacheService:
         Recherche une correspondance exacte via le hash SHA-256 de la requête.
         Si trouvé : incrémente hit_count, réinitialise TTL, retourne la réponse.
         
+        SPRINT 13: Enregistre les métriques Prometheus en cas de hit.
+        
         Args:
             query: Texte de la requête utilisateur
             db: Session de base de données
@@ -259,6 +271,12 @@ class CacheService:
             cost_xaf=float(cache_entry.cost_saved_xaf)
         )
         
+        # SPRINT 13 - Monitoring : Enregistrer le hit L1
+        record_cache_operation(
+            operation="hit",
+            level="level1"
+        )
+        
         return {
             "cache_id": str(cache_entry.id),
             "response": cache_entry.response,
@@ -285,6 +303,8 @@ class CacheService:
         Recherche une requête similaire via cosine similarity sur les embeddings.
         Seuil configurable (défaut: 0.95 = 95% de similarité).
         Si trouvé : incrémente hit_count, réinitialise TTL, retourne la réponse.
+        
+        SPRINT 13: Enregistre les métriques Prometheus en cas de hit.
         
         Args:
             query: Texte de la requête utilisateur
@@ -350,23 +370,28 @@ class CacheService:
             cost_xaf=float(best_match.cost_saved_xaf)
         )
         
+        # SPRINT 13 - Monitoring : Enregistrer le hit L2
+        record_cache_operation(
+            operation="hit",
+            level="level2"
+        )
+        
         return {
             "cache_id": str(best_match.id),
             "response": best_match.response,
             "sources": best_match.sources,
             "cache_level": 2,
-            "similarity": round(best_similarity, 4),
+            "similarity": best_similarity,
             "hit_count": best_match.hit_count,
             "token_count": best_match.token_count,
-            "query_text": best_match.query_text,
-            "original_query": best_match.query_text
+            "query_text": best_match.query_text
         }
     
     # =========================================================================
-    # VÉRIFICATION COMBINÉE (L1 + L2)
+    # RECHERCHE DANS LE CACHE
     # =========================================================================
     
-    def check_cache(
+    def get_cached_response(
         self,
         query: str,
         query_embedding: Optional[List[float]],
@@ -374,6 +399,10 @@ class CacheService:
     ) -> Optional[Dict[str, Any]]:
         """
         Vérifie le cache à tous les niveaux (L1 puis L2).
+        
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - record_cache_operation("hit/miss", "level1/level2/none")
+        - update_cache_hit_rate() pour calculer le taux de hit
         
         Args:
             query: Texte de la requête
@@ -386,16 +415,29 @@ class CacheService:
         # Essayer L1 d'abord (plus rapide)
         result = self.check_cache_level1(query, db)
         if result:
+            # SPRINT 13 - Monitoring : Mettre à jour le hit rate
+            self._update_cache_metrics(db)
             return result
         
         # Essayer L2 si embedding disponible
         if query_embedding:
             result = self.check_cache_level2(query, query_embedding, db)
             if result:
+                # SPRINT 13 - Monitoring : Mettre à jour le hit rate
+                self._update_cache_metrics(db)
                 return result
         
         # Enregistrer le miss
         self._record_cache_miss(db)
+        
+        # SPRINT 13 - Monitoring : Enregistrer le miss
+        record_cache_operation(
+            operation="miss",
+            level="none"
+        )
+        
+        # SPRINT 13 - Monitoring : Mettre à jour le hit rate
+        self._update_cache_metrics(db)
         
         return None
     
@@ -417,6 +459,8 @@ class CacheService:
     ) -> QueryCache:
         """
         Sauvegarde une requête et sa réponse dans le cache.
+        
+        SPRINT 13: Met à jour la métrique du nombre d'entrées de cache.
         
         Args:
             query: Texte de la requête utilisateur
@@ -470,6 +514,10 @@ class CacheService:
             
             db.commit()
             db.refresh(existing)
+            
+            # SPRINT 13 - Monitoring : Mettre à jour le nombre d'entrées
+            self._update_cache_entries_metric(db)
+            
             return existing
         
         # Créer une nouvelle entrée
@@ -500,6 +548,9 @@ class CacheService:
         db.refresh(cache_entry)
         
         logger.info(f"Cache créé - id={cache_entry.id}, documents={len(valid_document_ids)}")
+        
+        # SPRINT 13 - Monitoring : Mettre à jour le nombre d'entrées
+        self._update_cache_entries_metric(db)
         
         return cache_entry
     
@@ -548,6 +599,9 @@ class CacheService:
         
         logger.info(f"Caches invalidés: {deleted_count}")
         
+        # SPRINT 13 - Monitoring : Mettre à jour le nombre d'entrées
+        self._update_cache_entries_metric(db)
+        
         return deleted_count
     
     def invalidate_expired_cache(self, db: Session) -> int:
@@ -572,6 +626,9 @@ class CacheService:
         
         logger.info(f"Caches expirés supprimés: {deleted_count}")
         
+        # SPRINT 13 - Monitoring : Mettre à jour le nombre d'entrées
+        self._update_cache_entries_metric(db)
+        
         return deleted_count
     
     def invalidate_all_cache(self, db: Session) -> int:
@@ -592,6 +649,9 @@ class CacheService:
         db.commit()
         
         logger.info(f"Tous les caches supprimés: {deleted_count}")
+        
+        # SPRINT 13 - Monitoring : Mettre à jour le nombre d'entrées (devrait être 0)
+        self._update_cache_entries_metric(db)
         
         return deleted_count
     
@@ -635,6 +695,61 @@ class CacheService:
         stats.increment_miss()
         db.commit()
     
+    def _update_cache_metrics(self, db: Session) -> None:
+        """
+        Met à jour les métriques Prometheus du cache.
+        
+        SPRINT 13: Nouvelle méthode pour calculer et mettre à jour le cache hit rate.
+        """
+        try:
+            # Récupérer les stats d'aujourd'hui
+            today = date.today()
+            stats = db.query(CacheStatistics).filter(
+                CacheStatistics.date == today
+            ).first()
+            
+            if stats:
+                total = stats.hit_count + stats.miss_count
+                hit_rate = (stats.hit_count / total) if total > 0 else 0.0
+                
+                # Mettre à jour la métrique Prometheus
+                update_cache_hit_rate(hit_rate)
+        except Exception as e:
+            logger.warning(f"Erreur mise à jour métriques cache: {e}")
+    
+    def _update_cache_entries_metric(self, db: Session) -> None:
+        """
+        Met à jour la métrique du nombre d'entrées de cache.
+        
+        SPRINT 13: Nouvelle méthode pour mettre à jour irobot_cache_entries_total.
+        """
+        try:
+            count = self.get_cache_count(db)
+            update_cache_entries_total(count)
+        except Exception as e:
+            logger.warning(f"Erreur mise à jour métrique entrées cache: {e}")
+    
+    def get_cache_count(self, db: Session) -> int:
+        """
+        Retourne le nombre total d'entrées dans le cache (non expirées).
+        
+        SPRINT 13: Nouvelle méthode pour les métriques Prometheus.
+        
+        Args:
+            db: Session de base de données
+        
+        Returns:
+            Nombre d'entrées de cache actives
+        """
+        try:
+            count = db.query(QueryCache).filter(
+                QueryCache.expires_at > datetime.utcnow()
+            ).count()
+            return count
+        except Exception as e:
+            logger.error(f"Erreur comptage entrées cache: {e}")
+            return 0
+    
     def get_statistics(
         self,
         db: Session,
@@ -648,66 +763,63 @@ class CacheService:
             days: Nombre de jours à inclure
         
         Returns:
-            Dict avec les statistiques agrégées
+            Dict avec les statistiques
         """
         start_date = date.today() - timedelta(days=days - 1)
         
-        stats_list = db.query(CacheStatistics).filter(
+        stats = db.query(CacheStatistics).filter(
             CacheStatistics.date >= start_date
         ).order_by(CacheStatistics.date.desc()).all()
         
-        return CacheStatistics.get_summary(stats_list)
-    
-    def get_today_statistics(self, db: Session) -> Optional[CacheStatistics]:
-        """
-        Récupère les statistiques du jour.
+        if not stats:
+            return {
+                "period_days": days,
+                "total_hits": 0,
+                "total_misses": 0,
+                "hit_rate": 0.0,
+                "tokens_saved": 0,
+                "cost_saved_usd": 0.0,
+                "cost_saved_xaf": 0.0,
+                "daily_stats": []
+            }
         
-        Args:
-            db: Session de base de données
+        total_hits = sum(s.hit_count for s in stats)
+        total_misses = sum(s.miss_count for s in stats)
+        total_requests = total_hits + total_misses
         
-        Returns:
-            CacheStatistics du jour ou None
-        """
-        return db.query(CacheStatistics).filter(
-            CacheStatistics.date == date.today()
-        ).first()
-    
-    # =========================================================================
-    # CONFIGURATION
-    # =========================================================================
-    
-    def get_config(self) -> Dict[str, Any]:
-        """Retourne la configuration actuelle du cache."""
-        config = get_cache_config()
+        hit_rate = (total_hits / total_requests * 100) if total_requests > 0 else 0.0
+        
+        tokens_saved = sum(s.tokens_saved for s in stats)
+        cost_saved_usd = sum(float(s.cost_saved_usd) for s in stats)
+        cost_saved_xaf = sum(float(s.cost_saved_xaf) for s in stats)
+        
+        daily_stats = [
+            {
+                "date": s.date.isoformat(),
+                "hits": s.hit_count,
+                "misses": s.miss_count,
+                "hit_rate": (s.hit_count / (s.hit_count + s.miss_count) * 100) if (s.hit_count + s.miss_count) > 0 else 0.0,
+                "tokens_saved": s.tokens_saved,
+                "cost_saved_usd": float(s.cost_saved_usd),
+                "cost_saved_xaf": float(s.cost_saved_xaf)
+            }
+            for s in stats
+        ]
+        
         return {
-            "ttl_days": config["ttl_days"],
-            "similarity_threshold": config["similarity_threshold"],
-            "source": "database"
+            "period_days": days,
+            "total_hits": total_hits,
+            "total_misses": total_misses,
+            "total_requests": total_requests,
+            "hit_rate": round(hit_rate, 2),
+            "tokens_saved": tokens_saved,
+            "cost_saved_usd": round(cost_saved_usd, 4),
+            "cost_saved_xaf": round(cost_saved_xaf, 2),
+            "daily_stats": daily_stats
         }
     
-    # =========================================================================
-    # MÉTHODES UTILITAIRES
-    # =========================================================================
-    
-    def get_cache_entry(
-        self,
-        cache_id: str,
-        db: Session
-    ) -> Optional[QueryCache]:
-        """Récupère une entrée de cache par son ID."""
-        return db.query(QueryCache).filter(
-            QueryCache.id == cache_id
-        ).first()
-    
-    def get_cache_count(self, db: Session) -> int:
-        """Retourne le nombre total d'entrées dans le cache."""
-        return db.query(QueryCache).count()
-    
-    def get_active_cache_count(self, db: Session) -> int:
-        """Retourne le nombre d'entrées de cache non expirées."""
-        return db.query(QueryCache).filter(
-            QueryCache.expires_at > datetime.utcnow()
-        ).count()
+    # Alias pour compatibilité
+    check_cache = get_cached_response
 
 
 # =============================================================================
@@ -731,7 +843,7 @@ def get_cache_service() -> CacheService:
 
 
 # =============================================================================
-# HELPER FUNCTIONS
+# FONCTIONS HELPER (pour compatibilité)
 # =============================================================================
 
 def check_cache(
@@ -744,7 +856,7 @@ def check_cache(
     
     Args:
         query: Texte de la requête
-        query_embedding: Embedding de la requête
+        query_embedding: Embedding de la requête (optionnel)
         db: Session de base de données
     
     Returns:

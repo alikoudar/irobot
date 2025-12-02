@@ -6,6 +6,14 @@ from app.core.config import settings
 from app.api.v1.api import api_router
 import logging
 
+# SPRINT 13 - Monitoring : Import des middlewares de métriques
+from app.core.middleware import (
+    PrometheusMetricsMiddleware,
+    RequestIDMiddleware,
+    ProcessTimeMiddleware
+)
+from app.core.metrics import initialize_metrics
+
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
@@ -37,6 +45,13 @@ app.add_middleware(
 # Add GZip middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+# SPRINT 13 - Monitoring : Add Prometheus metrics middleware
+# IMPORTANT: PrometheusMetricsMiddleware doit être ajouté en DERNIER
+# pour capturer toutes les requêtes après les autres middlewares
+app.add_middleware(ProcessTimeMiddleware)
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(PrometheusMetricsMiddleware)
+
 # Include API v1 router
 app.include_router(api_router, prefix="/v1")
 
@@ -46,6 +61,12 @@ async def startup_event():
     """Run on application startup."""
     logger.info(f"Starting {settings.APP_NAME} in {settings.APP_ENV} mode")
     logger.info("API v1 routes mounted at /v1")
+    
+    # SPRINT 13 - Monitoring : Initialize Prometheus metrics
+    logger.info("Initializing Prometheus metrics...")
+    initialize_metrics()
+    logger.info("Prometheus metrics initialized successfully")
+    logger.info("Metrics endpoint available at /v1/metrics")
 
 
 @app.on_event("shutdown")

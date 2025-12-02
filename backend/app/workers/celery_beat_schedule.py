@@ -5,12 +5,14 @@ Configuration du Celery Beat Schedule.
 """
 from celery.schedules import crontab
 
-
-# =============================================================================
-# BEAT SCHEDULE - TÂCHES PÉRIODIQUES
-# =============================================================================
-
 CELERY_BEAT_SCHEDULE = {
+    # SPRINT 13 - Collecte des métriques infrastructure toutes les 30 secondes
+    "collect-infrastructure-metrics": {
+        "task": "app.core.metrics_collector.collect_infrastructure_metrics",
+        "schedule": 30.0,  # 30 secondes
+        "options": {"queue": "default"},
+    },
+    
     # Mise à jour du taux de change tous les jours à 1h du matin (UTC)
     "update-exchange-rate-daily": {
         "task": "app.workers.periodic_tasks.update_exchange_rate",

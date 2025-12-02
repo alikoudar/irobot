@@ -9,6 +9,7 @@ Ce client gère toutes les interactions avec la base Weaviate :
 - Suppression de documents
 
 Sprint 5 - Corrigé Sprint 7 : Ajout méthode hybrid_search async
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour toutes les opérations
 """
 
 import logging
@@ -24,6 +25,14 @@ from weaviate.classes.data import DataObject
 from weaviate.util import generate_uuid5
 
 from app.core.config import settings
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_weaviate_query,
+    record_weaviate_batch_operation,
+    update_weaviate_objects_total,
+    record_weaviate_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +86,8 @@ class WeaviateClient:
     - Insertion batch de vecteurs
     - Recherche hybride (BM25 + semantic)
     - Suppression de documents
+    
+    SPRINT 13: Toutes les opérations sont maintenant instrumentées avec Prometheus.
     """
     
     def __init__(self, url: Optional[str] = None):
@@ -111,6 +122,8 @@ class WeaviateClient:
             return self.client.is_ready()
         except Exception as e:
             logger.error(f"Weaviate non accessible: {e}")
+            # SPRINT 13 - Monitoring : Enregistrer l'erreur
+            record_weaviate_error("connection_error")
             return False
     
     def collection_exists(self, name: str = None) -> bool:
@@ -120,6 +133,7 @@ class WeaviateClient:
             return self.client.collections.exists(coll_name)
         except Exception as e:
             logger.error(f"Erreur vérification collection: {e}")
+            record_weaviate_error("collection_check_error")
             return False
     
     def create_collection(self, name: str = None) -> bool:
@@ -165,6 +179,7 @@ class WeaviateClient:
             
         except Exception as e:
             logger.error(f"Erreur création collection: {e}")
+            record_weaviate_error("collection_creation_error")
             return False
     
     def batch_insert(
@@ -175,6 +190,10 @@ class WeaviateClient:
     ) -> IndexingResult:
         """
         Insère des chunks en batch dans Weaviate.
+        
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - irobot_weaviate_batch_operations_total
+        - irobot_weaviate_objects_total (mis à jour)
         
         Args:
             chunks: Liste de chunks avec leurs propriétés
@@ -222,21 +241,41 @@ class WeaviateClient:
                             uuid=weaviate_id
                         )
                         
-                        weaviate_ids.append(str(weaviate_id))
                         success_count += 1
+                        weaviate_ids.append(str(weaviate_id))
                         
                     except Exception as e:
                         error_count += 1
                         errors.append({
-                            "chunk_id": chunk.get("chunk_id"),
+                            "chunk_index": i,
                             "error": str(e)
                         })
+                        logger.error(f"Erreur insertion chunk {i}: {e}")
             
             processing_time = time.time() - start_time
             
+            # SPRINT 13 - Monitoring : Enregistrer les métriques batch
+            if success_count > 0:
+                record_weaviate_batch_operation(
+                    operation="insert",
+                    status="success",
+                    count=success_count
+                )
+            
+            if error_count > 0:
+                record_weaviate_batch_operation(
+                    operation="insert",
+                    status="failure",
+                    count=error_count
+                )
+                record_weaviate_error("batch_insert_error")
+            
+            # SPRINT 13 - Monitoring : Mettre à jour le nombre total d'objets
+            # (sera appelé périodiquement par un job séparé)
+            
             logger.info(
-                f"Batch insert terminé: {success_count} succès, "
-                f"{error_count} erreurs, {processing_time:.2f}s"
+                f"Batch insert: {success_count} succès, {error_count} erreurs, "
+                f"{processing_time:.2f}s"
             )
             
             return IndexingResult(
@@ -249,6 +288,8 @@ class WeaviateClient:
             
         except Exception as e:
             logger.error(f"Erreur batch insert: {e}")
+            record_weaviate_error("batch_insert_fatal_error")
+            
             return IndexingResult(
                 success_count=0,
                 error_count=len(chunks),
@@ -259,69 +300,68 @@ class WeaviateClient:
     
     async def hybrid_search(
         self,
+        collection_name: str,
         query: str,
         vector: List[float],
         alpha: float = 0.75,
         limit: int = 10,
-        collection_name: str = None,
-        properties: List[str] = None,
-        where_filter: dict = None,
+        properties: Optional[List[str]] = None,
+        where_filter: Optional[dict] = None,
         return_metadata: bool = True
     ) -> List[dict]:
         """
-        Effectue une recherche hybride dans Weaviate.
+        Recherche hybride dans Weaviate (BM25 + semantic).
         
-        Combine recherche BM25 (lexicale) et recherche vectorielle (sémantique).
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - irobot_weaviate_query_duration_seconds
         
         Args:
+            collection_name: Nom de la collection
             query: Texte de la requête (pour BM25)
-            vector: Vecteur embedding de la requête
-            alpha: Poids entre BM25 et sémantique (0=BM25 pur, 1=sémantique pur)
-            limit: Nombre de résultats à retourner
-            collection_name: Nom de la collection (optionnel)
-            properties: Liste des propriétés à retourner
+            vector: Vecteur de la requête (pour recherche semantic)
+            alpha: Poids semantic vs BM25 (0=BM25, 1=semantic)
+            limit: Nombre maximum de résultats
+            properties: Propriétés à retourner
             where_filter: Filtres optionnels
-            return_metadata: Inclure les métadonnées (score, distance)
-        
+            return_metadata: Retourner les métadonnées (score, distance)
+            
         Returns:
-            Liste de dictionnaires avec les résultats
+            Liste de résultats (format dict attendu par retriever)
         """
+        # SPRINT 13 - Monitoring : Mesurer la durée
+        start_time = time.time()
+        
         try:
-            # Utiliser la collection par défaut si non spécifiée
-            coll_name = collection_name or COLLECTION_NAME
-            collection = self.client.collections.get(coll_name)
+            collection = self.client.collections.get(collection_name)
             
-            # Construire les métadonnées à retourner
-            metadata_query = None
-            if return_metadata:
-                metadata_query = MetadataQuery(score=True, distance=True)
-            
-            # Construire le filtre Weaviate si fourni
-            weaviate_filter = None
-            if where_filter:
-                weaviate_filter = self._build_filter(where_filter)
+            # Construire le filtre Weaviate
+            filters = self._build_filter(where_filter) if where_filter else None
             
             # Exécuter la recherche hybride
-            response = collection.query.hybrid(
-                query=query,
-                vector=vector,
-                alpha=alpha,
-                limit=limit,
-                return_metadata=metadata_query,
-                filters=weaviate_filter
-            )
+            if filters:
+                response = collection.query.hybrid(
+                    query=query,
+                    vector=vector,
+                    alpha=alpha,
+                    limit=limit,
+                    filters=filters,
+                    return_metadata=MetadataQuery(score=True, distance=True) if return_metadata else None
+                )
+            else:
+                response = collection.query.hybrid(
+                    query=query,
+                    vector=vector,
+                    alpha=alpha,
+                    limit=limit,
+                    return_metadata=MetadataQuery(score=True, distance=True) if return_metadata else None
+                )
             
-            # Convertir les résultats en dictionnaires
-            # Format attendu par le retriever (retriever.py ligne 455-480)
+            # Convertir les résultats au format attendu par retriever
             results = []
             for obj in response.objects:
-                # Extraire le score
-                score = 0.0
-                if obj.metadata:
-                    if hasattr(obj.metadata, 'score') and obj.metadata.score is not None:
-                        score = float(obj.metadata.score)
+                # Calculer le score (0-1, plus haut = meilleur)
+                score = obj.metadata.score if obj.metadata and hasattr(obj.metadata, 'score') else 0.0
                 
-                # Format compatible avec retriever._process_results()
                 result = {}
                 
                 # Copier toutes les propriétés au niveau racine
@@ -337,12 +377,31 @@ class WeaviateClient:
                     
                 results.append(result)
             
-            logger.debug(f"Recherche hybride: {len(results)} résultats pour '{query[:50]}...'")
+            # SPRINT 13 - Monitoring : Enregistrer la durée de la recherche
+            duration = time.time() - start_time
+            record_weaviate_query(
+                operation="search",
+                duration=duration
+            )
+            
+            logger.debug(
+                f"Recherche hybride: {len(results)} résultats pour '{query[:50]}...', "
+                f"{duration:.3f}s"
+            )
             
             return results
             
         except Exception as e:
+            duration = time.time() - start_time
             logger.error(f"Erreur recherche hybride: {e}")
+            
+            # SPRINT 13 - Monitoring : Enregistrer l'erreur et la durée
+            record_weaviate_error("search_error")
+            record_weaviate_query(
+                operation="search",
+                duration=duration
+            )
+            
             return []
     
     def _build_filter(self, where_filter: dict):
@@ -425,6 +484,9 @@ class WeaviateClient:
         Returns:
             Liste de SearchResult
         """
+        # SPRINT 13 - Monitoring : Mesurer la durée
+        start_time = time.time()
+        
         try:
             collection = self.client.collections.get(COLLECTION_NAME)
             
@@ -455,10 +517,26 @@ class WeaviateClient:
                     }
                 ))
             
+            # SPRINT 13 - Monitoring : Enregistrer la durée
+            duration = time.time() - start_time
+            record_weaviate_query(
+                operation="search",
+                duration=duration
+            )
+            
             return results
             
         except Exception as e:
+            duration = time.time() - start_time
             logger.error(f"Erreur recherche hybride: {e}")
+            
+            # SPRINT 13 - Monitoring
+            record_weaviate_error("search_error")
+            record_weaviate_query(
+                operation="search",
+                duration=duration
+            )
+            
             return []
     
     def delete_document_chunks(
@@ -469,6 +547,10 @@ class WeaviateClient:
         """
         Supprime tous les chunks d'un document.
         
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - irobot_weaviate_query_duration_seconds (pour delete)
+        - irobot_weaviate_objects_total (mis à jour)
+        
         Args:
             document_id: ID du document
             collection_name: Nom de la collection
@@ -477,6 +559,9 @@ class WeaviateClient:
             Nombre de chunks supprimés
         """
         coll_name = collection_name or COLLECTION_NAME
+        
+        # SPRINT 13 - Monitoring : Mesurer la durée
+        start_time = time.time()
         
         try:
             collection = self.client.collections.get(coll_name)
@@ -488,12 +573,31 @@ class WeaviateClient:
             
             deleted_count = result.successful if hasattr(result, 'successful') else 0
             
-            logger.info(f"Supprimé {deleted_count} chunks pour document {document_id}")
+            # SPRINT 13 - Monitoring : Enregistrer la durée de l'opération
+            duration = time.time() - start_time
+            record_weaviate_query(
+                operation="delete",
+                duration=duration
+            )
+            
+            logger.info(
+                f"Supprimé {deleted_count} chunks pour document {document_id}, "
+                f"{duration:.3f}s"
+            )
             
             return deleted_count
             
         except Exception as e:
+            duration = time.time() - start_time
             logger.error(f"Erreur suppression chunks: {e}")
+            
+            # SPRINT 13 - Monitoring
+            record_weaviate_error("delete_error")
+            record_weaviate_query(
+                operation="delete",
+                duration=duration
+            )
+            
             return 0
     
     def get_document_chunk_count(
@@ -525,6 +629,44 @@ class WeaviateClient:
             
         except Exception as e:
             logger.error(f"Erreur comptage chunks: {e}")
+            record_weaviate_error("count_error")
+            return 0
+    
+    def get_total_objects_count(self, collection_name: str = None) -> int:
+        """
+        Retourne le nombre total d'objets dans une collection.
+        
+        SPRINT 13: Nouvelle méthode pour les métriques Prometheus.
+        À appeler périodiquement pour mettre à jour irobot_weaviate_objects_total.
+        
+        Args:
+            collection_name: Nom de la collection
+            
+        Returns:
+            Nombre total d'objets
+        """
+        coll_name = collection_name or COLLECTION_NAME
+        
+        try:
+            collection = self.client.collections.get(coll_name)
+            
+            result = collection.aggregate.over_all(
+                total_count=True
+            )
+            
+            count = result.total_count if result else 0
+            
+            # SPRINT 13 - Monitoring : Mettre à jour la métrique
+            update_weaviate_objects_total(
+                class_name=coll_name,
+                count=count
+            )
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Erreur comptage total objets: {e}")
+            record_weaviate_error("total_count_error")
             return 0
 
 

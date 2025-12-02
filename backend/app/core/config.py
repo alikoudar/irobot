@@ -60,6 +60,13 @@ class Settings(BaseSettings):
 
     PHOENIX_URL: str = "http://phoenix:6006"
 
+        # Grafana credentials
+    GRAFANA_ADMIN_USER: str
+    GRAFANA_ADMIN_PASSWORD: str
+
+    # Phoenix (optionnel)
+    PHOENIX_SQL_DATABASE_URL: str 
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,

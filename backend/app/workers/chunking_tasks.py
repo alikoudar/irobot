@@ -6,10 +6,13 @@ MODIFICATION: Les paramètres de chunking sont lus depuis la DB via ConfigServic
 - overlap: depuis config "chunking.overlap"
 - min_size: depuis config "chunking.min_size"
 - max_size: depuis config "chunking.max_size"
+
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour les tasks Celery
 """
 import logging
 import uuid
 import re
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -19,6 +22,11 @@ from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
 from app.models.document import Document, DocumentStatus, ProcessingStage
 from app.models.chunk import Chunk
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_celery_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +121,10 @@ def chunk_document(self, document_id: str) -> Dict[str, Any]:
     - chunking.min_size: taille minimum
     - chunking.max_size: taille maximum
     
+    SPRINT 13: Enregistre les métriques Prometheus :
+    - irobot_celery_tasks_total{queue="chunking",status="success/failure"}
+    - irobot_celery_task_duration_seconds{queue="chunking"}
+    
     Args:
         document_id: UUID du document
         
@@ -128,7 +140,9 @@ def chunk_document(self, document_id: str) -> Dict[str, Any]:
     )
     
     db = SessionLocal()
-    start_time = datetime.utcnow()
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée de la tâche
+    task_start_time = time.time()
     
     try:
         # =================================================================
@@ -212,12 +226,12 @@ def chunk_document(self, document_id: str) -> Dict[str, Any]:
         for idx, chunk_data in enumerate(chunks_data):
             chunk_text = chunk_data['text']
             
-            # Détecter si le chunk contient du contenu OCR
-            has_ocr_content = bool(re.search(r'\[Image \d+\]|=== Page', chunk_text))
+            # Détection de contenu OCR
+            has_ocr_content = total_images_ocr > 0
             if has_ocr_content:
                 chunks_with_ocr += 1
             
-            # Détecter si le chunk contient un tableau
+            # Détection de tableaux
             has_table = bool(re.search(r'\|[^\n]+\|', chunk_text))
             
             # Métadonnées enrichies
@@ -267,7 +281,8 @@ def chunk_document(self, document_id: str) -> Dict[str, Any]:
         # 7. METTRE À JOUR LE DOCUMENT
         # =================================================================
         
-        chunking_time = (datetime.utcnow() - start_time).total_seconds()
+        # SPRINT 13 - Monitoring : Calculer la durée
+        chunking_time = time.time() - task_start_time
         
         document.total_chunks = len(created_chunks)
         document.chunking_time_seconds = chunking_time
@@ -310,6 +325,13 @@ def chunk_document(self, document_id: str) -> Dict[str, Any]:
         
         logger.info(f"Document {document_id} envoyé à la queue embedding")
         
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        record_celery_task(
+            queue="chunking",
+            duration=chunking_time,
+            status="success"
+        )
+        
         return {
             'document_id': str(document_id),
             'total_chunks': len(created_chunks),
@@ -327,6 +349,15 @@ def chunk_document(self, document_id: str) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Chunking failed for document {document_id}: {e}")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="chunking",
+            duration=task_duration,
+            status="failure"
+        )
+        
         db.rollback()
         raise
         

@@ -8,7 +8,8 @@ from app.api.v1.endpoints import (auth,
                                   feedbacks,
                                   dashboard,
                                   manager_dashboard,
-                                  config)
+                                  config,
+                                  metrics_endpoint)
 
 # Créer le router principal v1
 api_router = APIRouter()
@@ -59,4 +60,9 @@ api_router.include_router(
 api_router.include_router(
     config.router,
     tags=["Configuration"]
+)
+
+api_router.include_router(
+    metrics_endpoint.router,
+    tags=["Monitoring"]
 )

@@ -5,9 +5,12 @@ Ces tâches s'exécutent automatiquement selon le schedule défini dans celery_a
 - update_exchange_rate: Tous les jours à minuit
 - cleanup_expired_cache: Tous les jours à 3h
 - cleanup_old_logs: Tous les jours à 4h
+
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour les tasks périodiques
 """
 import logging
 import httpx
+import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Any, Optional
@@ -15,6 +18,11 @@ from typing import Dict, Any, Optional
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.db.session import SessionLocal
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_celery_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +63,10 @@ def update_exchange_rate(self) -> Dict[str, Any]:
     
     Schedule: Tous les jours (86400 secondes)
     
+    SPRINT 13: Enregistre les métriques Prometheus :
+    - irobot_celery_tasks_total{queue="default",status="success/failure"}
+    - irobot_celery_task_duration_seconds{queue="default"}
+    
     Returns:
         Dict avec le résultat de la mise à jour
     """
@@ -62,6 +74,9 @@ def update_exchange_rate(self) -> Dict[str, Any]:
     from app.services.config_service import get_config_service
     
     db = SessionLocal()
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée
+    task_start_time = time.time()
     
     try:
         # Vérifier si l'API est activée
@@ -74,6 +89,15 @@ def update_exchange_rate(self) -> Dict[str, Any]:
         
         if not api_enabled:
             logger.info("Mise à jour du taux de change désactivée dans la config")
+            
+            # SPRINT 13 - Monitoring : Enregistrer comme succès (skipped)
+            task_duration = time.time() - task_start_time
+            record_celery_task(
+                queue="default",
+                duration=task_duration,
+                status="success"
+            )
+            
             return {
                 "status": "skipped",
                 "reason": "API disabled in config"
@@ -84,6 +108,15 @@ def update_exchange_rate(self) -> Dict[str, Any]:
         
         if not api_key:
             logger.warning("EXCHANGE_RATE_API_KEY non configurée")
+            
+            # SPRINT 13 - Monitoring : Enregistrer l'échec
+            task_duration = time.time() - task_start_time
+            record_celery_task(
+                queue="default",
+                duration=task_duration,
+                status="failure"
+            )
+            
             return {
                 "status": "error",
                 "reason": "API key not configured"
@@ -141,6 +174,14 @@ def update_exchange_rate(self) -> Dict[str, Any]:
         
         logger.info(f"Taux USD/XAF mis à jour: {rate}")
         
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="success"
+        )
+        
         return {
             "status": "success",
             "rate": rate,
@@ -152,18 +193,44 @@ def update_exchange_rate(self) -> Dict[str, Any]:
         
     except httpx.TimeoutException:
         logger.error("Timeout lors de l'appel API Exchange Rate")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="failure"
+        )
+        
         return {
             "status": "error",
             "reason": "API timeout"
         }
     except httpx.HTTPStatusError as e:
         logger.error(f"Erreur HTTP {e.response.status_code}")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="failure"
+        )
+        
         return {
             "status": "error",
             "reason": f"HTTP {e.response.status_code}"
         }
     except Exception as e:
         logger.error(f"Erreur mise à jour taux de change: {e}")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="failure"
+        )
         
         # Retry si possible
         if self.request.retries < self.max_retries:
@@ -190,12 +257,17 @@ def cleanup_expired_cache() -> Dict[str, Any]:
     
     Schedule: Tous les jours (86400 secondes)
     
+    SPRINT 13: Enregistre les métriques Prometheus.
+    
     Returns:
         Dict avec le nombre d'entrées supprimées
     """
     from app.models.query_cache import QueryCache
     
     db = SessionLocal()
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée
+    task_start_time = time.time()
     
     try:
         now = datetime.utcnow()
@@ -207,6 +279,15 @@ def cleanup_expired_cache() -> Dict[str, Any]:
         
         if expired_count == 0:
             logger.info("Aucune entrée de cache expirée à nettoyer")
+            
+            # SPRINT 13 - Monitoring : Enregistrer le succès
+            task_duration = time.time() - task_start_time
+            record_celery_task(
+                queue="default",
+                duration=task_duration,
+                status="success"
+            )
+            
             return {
                 "status": "success",
                 "deleted_count": 0
@@ -221,6 +302,14 @@ def cleanup_expired_cache() -> Dict[str, Any]:
         
         logger.info(f"Cache nettoyé: {expired_count} entrées expirées supprimées")
         
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="success"
+        )
+        
         return {
             "status": "success",
             "deleted_count": expired_count,
@@ -230,6 +319,15 @@ def cleanup_expired_cache() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Erreur nettoyage cache: {e}")
         db.rollback()
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="failure"
+        )
+        
         return {
             "status": "error",
             "reason": str(e)
@@ -251,6 +349,8 @@ def cleanup_old_logs() -> Dict[str, Any]:
     
     Schedule: Tous les jours (86400 secondes)
     
+    SPRINT 13: Enregistre les métriques Prometheus.
+    
     Returns:
         Dict avec les statistiques de nettoyage
     """
@@ -258,6 +358,9 @@ def cleanup_old_logs() -> Dict[str, Any]:
     from app.models.token_usage import TokenUsage
     
     db = SessionLocal()
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée
+    task_start_time = time.time()
     
     try:
         cutoff_date = datetime.utcnow() - timedelta(days=LOG_RETENTION_DAYS)
@@ -306,11 +409,28 @@ def cleanup_old_logs() -> Dict[str, Any]:
         
         db.commit()
         
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="success"
+        )
+        
         return results
         
     except Exception as e:
         logger.error(f"Erreur nettoyage logs: {e}")
         db.rollback()
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="failure"
+        )
+        
         return {
             "status": "error",
             "reason": str(e)
@@ -330,49 +450,79 @@ def health_check() -> Dict[str, Any]:
     
     Peut être utilisé pour le monitoring.
     
+    SPRINT 13: Enregistre les métriques Prometheus.
+    
     Returns:
         Dict avec le status de chaque service
     """
     import redis
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée
+    task_start_time = time.time()
     
     results = {
         "timestamp": datetime.utcnow().isoformat(),
         "services": {}
     }
     
-    # Check PostgreSQL
     try:
-        db = SessionLocal()
-        db.execute("SELECT 1")
-        db.close()
-        results["services"]["postgresql"] = "healthy"
+        # Check PostgreSQL
+        try:
+            db = SessionLocal()
+            db.execute("SELECT 1")
+            db.close()
+            results["services"]["postgresql"] = "healthy"
+        except Exception as e:
+            results["services"]["postgresql"] = f"unhealthy: {e}"
+        
+        # Check Redis
+        try:
+            r = redis.from_url(settings.REDIS_URL)
+            r.ping()
+            results["services"]["redis"] = "healthy"
+        except Exception as e:
+            results["services"]["redis"] = f"unhealthy: {e}"
+        
+        # Check Weaviate
+        try:
+            import httpx
+            response = httpx.get(f"{settings.WEAVIATE_URL}/v1/.well-known/ready", timeout=5)
+            if response.status_code == 200:
+                results["services"]["weaviate"] = "healthy"
+            else:
+                results["services"]["weaviate"] = f"unhealthy: HTTP {response.status_code}"
+        except Exception as e:
+            results["services"]["weaviate"] = f"unhealthy: {e}"
+        
+        # Status global
+        all_healthy = all(
+            v == "healthy" 
+            for v in results["services"].values()
+        )
+        results["status"] = "healthy" if all_healthy else "degraded"
+        
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="success"
+        )
+        
+        return results
+        
     except Exception as e:
-        results["services"]["postgresql"] = f"unhealthy: {e}"
-    
-    # Check Redis
-    try:
-        r = redis.from_url(settings.REDIS_URL)
-        r.ping()
-        results["services"]["redis"] = "healthy"
-    except Exception as e:
-        results["services"]["redis"] = f"unhealthy: {e}"
-    
-    # Check Weaviate
-    try:
-        import httpx
-        response = httpx.get(f"{settings.WEAVIATE_URL}/v1/.well-known/ready", timeout=5)
-        if response.status_code == 200:
-            results["services"]["weaviate"] = "healthy"
-        else:
-            results["services"]["weaviate"] = f"unhealthy: HTTP {response.status_code}"
-    except Exception as e:
-        results["services"]["weaviate"] = f"unhealthy: {e}"
-    
-    # Status global
-    all_healthy = all(
-        v == "healthy" 
-        for v in results["services"].values()
-    )
-    results["status"] = "healthy" if all_healthy else "degraded"
-    
-    return results
+        logger.error(f"Erreur health check: {e}")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="default",
+            duration=task_duration,
+            status="failure"
+        )
+        
+        return {
+            "status": "error",
+            "reason": str(e)
+        }

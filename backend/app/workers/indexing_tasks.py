@@ -9,6 +9,7 @@ Ce worker :
 5. Met à jour le document: status=COMPLETED
 
 CORRECTION : Sépare chunks et vectors pour batch_insert()
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour les tasks Celery
 """
 import logging
 import time
@@ -19,6 +20,11 @@ from celery import Task
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_celery_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +96,10 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
     5. Mettre à jour les weaviate_id des chunks
     6. Marquer le document comme COMPLETED
     
+    SPRINT 13: Enregistre les métriques Prometheus :
+    - irobot_celery_tasks_total{queue="indexing",status="success/failure"}
+    - irobot_celery_task_duration_seconds{queue="indexing"}
+    
     Args:
         document_id: UUID du document
         
@@ -103,7 +113,9 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
     from app.clients.weaviate_client import get_weaviate_client
     
     db = SessionLocal()
-    start_time = time.time()
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée de la tâche
+    task_start_time = time.time()
     weaviate_client = None
     
     try:
@@ -253,7 +265,8 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
         # 6. MARQUER LE DOCUMENT COMME COMPLETED
         # =================================================================
         
-        indexing_time = time.time() - start_time
+        # SPRINT 13 - Monitoring : Calculer la durée
+        indexing_time = time.time() - task_start_time
         total_processing_time = (
             (document.extraction_time_seconds or 0) +
             (document.chunking_time_seconds or 0) +
@@ -285,6 +298,13 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
             f"{indexing_time:.2f}s"
         )
         
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        record_celery_task(
+            queue="indexing",
+            duration=indexing_time,
+            status="success"
+        )
+        
         return {
             "document_id": str(document_id),
             "status": "success",
@@ -298,6 +318,14 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Erreur indexation document {document_id}: {e}")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="indexing",
+            duration=task_duration,
+            status="failure"
+        )
         
         # Mettre à jour le status en cas d'erreur
         try:

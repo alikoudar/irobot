@@ -1,0 +1,152 @@
+groups:
+  - name: irobot_alerts
+    interval: 30s
+    rules:
+      # Alertes Backend
+      - alert: BackendDown
+        expr: up{job="irobot-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: backend
+        annotations:
+          summary: "Backend FastAPI est DOWN"
+          description: "Le service backend n'a pas répondu depuis 2 minutes."
+
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.95, rate(irobot_http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "Latence élevée des requêtes HTTP"
+          description: "Le p95 de latence des requêtes dépasse 2 secondes."
+
+      - alert: HighErrorRate
+        expr: rate(irobot_http_requests_total{status_code=~"5.."}[5m]) / rate(irobot_http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: backend
+        annotations:
+          summary: "Taux d'erreur HTTP élevé"
+          description: "Plus de 5% des requêtes retournent une erreur 5xx."
+
+      # Alertes Cache
+      - alert: LowCacheHitRate
+        expr: irobot_cache_hit_rate < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: cache
+        annotations:
+          summary: "Taux de hit du cache faible"
+          description: "Le taux de hit du cache est inférieur à 50% depuis 10 minutes."
+
+      # Alertes RAG Pipeline
+      - alert: HighDocumentProcessingFailureRate
+        expr: rate(irobot_document_processing_failed_total[10m]) / rate(irobot_document_processing_total[10m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: rag-pipeline
+        annotations:
+          summary: "Taux d'échec élevé du traitement de documents"
+          description: "Plus de 10% des documents échouent lors du traitement."
+
+      - alert: SlowCeleryTaskProcessing
+        expr: histogram_quantile(0.95, rate(irobot_celery_task_duration_seconds_bucket{queue="processing"}[10m])) > 300
+        for: 10m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Traitement de tâches Celery lent"
+          description: "Le p95 du temps de traitement des tâches processing dépasse 5 minutes."
+
+      # Alertes LLM & Tokens
+      - alert: HighTokenUsage
+        expr: rate(irobot_llm_tokens_total[1h]) > 1000000
+        for: 1h
+        labels:
+          severity: info
+          service: llm
+        annotations:
+          summary: "Consommation de tokens élevée"
+          description: "Plus d'1M de tokens consommés dans la dernière heure."
+
+      - alert: HighLLMCost
+        expr: increase(irobot_llm_cost_usd_total[1d]) > 100
+        for: 1h
+        labels:
+          severity: warning
+          service: llm
+        annotations:
+          summary: "Coût LLM élevé"
+          description: "Le coût journalier du LLM dépasse 100 USD."
+
+      # Alertes Weaviate
+      - alert: WeaviateDown
+        expr: up{job="weaviate"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: weaviate
+        annotations:
+          summary: "Weaviate est DOWN"
+          description: "Le service Weaviate n'a pas répondu depuis 2 minutes."
+
+      # Alertes Système
+      - alert: HighMemoryUsage
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Utilisation mémoire élevée"
+          description: "Un conteneur utilise plus de 90% de sa mémoire allouée."
+
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Utilisation CPU élevée"
+          description: "Un conteneur utilise plus de 80% du CPU pendant 10 minutes."
+
+  - name: celery_alerts
+    interval: 30s
+    rules:
+      - alert: CeleryWorkerDown
+        expr: irobot_celery_workers_active < 4
+        for: 3m
+        labels:
+          severity: critical
+          service: celery
+        annotations:
+          summary: "Worker Celery DOWN"
+          description: "Un worker Celery ne répond plus depuis 3 minutes."
+
+      - alert: HighCeleryTaskFailureRate
+        expr: rate(irobot_celery_tasks_total{status="failure"}[10m]) / rate(irobot_celery_tasks_total[10m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Taux d'échec élevé des tâches Celery"
+          description: "Plus de 10% des tâches Celery échouent."
+
+      - alert: LongCeleryQueueLength
+        expr: irobot_celery_queue_length > 1000
+        for: 15m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "File d'attente Celery longue"
+          description: "Plus de 1000 tâches en attente dans une queue Celery."

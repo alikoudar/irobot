@@ -9,6 +9,7 @@ Ce worker :
 5. Envoie le document à la queue d'indexation
 
 MODIFICATION: Utilise ConfigService pour les tarifs et paramètres.
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour les tasks Celery
 """
 import logging
 import time
@@ -21,6 +22,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.celery_app import celery_app
 from app.db.session import SessionLocal
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_celery_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,10 @@ def embed_chunks(self, document_id: str) -> Dict[str, Any]:
     Les paramètres (batch_size, modèle, tarifs) sont lus depuis la DB.
     Le taux de change est lu depuis la table exchange_rates.
     
+    SPRINT 13: Enregistre les métriques Prometheus :
+    - irobot_celery_tasks_total{queue="embedding",status="success/failure"}
+    - irobot_celery_task_duration_seconds{queue="embedding"}
+    
     Args:
         document_id: UUID du document
         
@@ -98,7 +108,9 @@ def embed_chunks(self, document_id: str) -> Dict[str, Any]:
     from app.services.exchange_rate_service import ExchangeRateService
     
     db = SessionLocal()
-    start_time = time.time()
+    
+    # SPRINT 13 - Monitoring : Mesurer la durée de la tâche
+    task_start_time = time.time()
     
     try:
         # =================================================================
@@ -210,7 +222,8 @@ def embed_chunks(self, document_id: str) -> Dict[str, Any]:
         # 4. METTRE À JOUR LES CHUNKS AVEC LES EMBEDDINGS
         # =================================================================
         
-        embedding_time = time.time() - start_time
+        # SPRINT 13 - Monitoring : Calculer la durée
+        embedding_time = time.time() - task_start_time
         chunks_updated = 0
         
         for chunk in chunks:
@@ -265,6 +278,13 @@ def embed_chunks(self, document_id: str) -> Dict[str, Any]:
         
         logger.info(f"Document {document_id} envoyé à la queue indexing")
         
+        # SPRINT 13 - Monitoring : Enregistrer le succès
+        record_celery_task(
+            queue="embedding",
+            duration=embedding_time,
+            status="success"
+        )
+        
         return {
             "document_id": str(document_id),
             "status": "success",
@@ -282,6 +302,14 @@ def embed_chunks(self, document_id: str) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Erreur embedding document {document_id}: {e}")
+        
+        # SPRINT 13 - Monitoring : Enregistrer l'échec
+        task_duration = time.time() - task_start_time
+        record_celery_task(
+            queue="embedding",
+            duration=task_duration,
+            status="failure"
+        )
         
         try:
             from app.models.document import Document, DocumentStatus, ProcessingStage

@@ -8,6 +8,8 @@ Ce client centralise les interactions avec l'API Mistral pour :
 
 MODIFICATION: Les tarifs et modèles sont maintenant lus depuis la DB via ConfigService.
 Note: L'OCR est géré séparément dans app/rag/ocr_processor.py
+
+SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour toutes les opérations
 """
 import logging
 import time
@@ -19,6 +21,12 @@ from mistralai.models import EmbeddingResponse
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+
+# SPRINT 13 - Monitoring : Import des métriques Prometheus
+from app.core.metrics import (
+    record_embedding_request,
+    record_llm_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +193,8 @@ class MistralClient:
     
     Gère l'embedding, le reranking et la génération de texte.
     Les tarifs et modèles sont lus dynamiquement depuis la DB.
+    
+    SPRINT 13: Toutes les opérations sont maintenant instrumentées avec Prometheus.
     """
     
     def __init__(self, api_key: Optional[str] = None):
@@ -208,6 +218,10 @@ class MistralClient:
     ) -> EmbeddingResult:
         """
         Génère les embeddings pour une liste de textes.
+        
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - irobot_embedding_requests_total
+        - irobot_embedding_duration_seconds
         
         Args:
             texts: Liste de textes à embedder
@@ -241,6 +255,12 @@ class MistralClient:
             
             processing_time = time.time() - start_time
             
+            # SPRINT 13 - Monitoring : Enregistrer les métriques Prometheus
+            record_embedding_request(
+                model=model,
+                duration=processing_time
+            )
+            
             logger.debug(
                 f"Embedding: {len(texts)} textes, {token_count} tokens, "
                 f"{processing_time:.2f}s"
@@ -263,10 +283,17 @@ class MistralClient:
         model: Optional[str] = None,
         max_tokens: int = 2048,
         temperature: float = 0.7,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        operation: str = "chat"  # SPRINT 13: Nouveau paramètre pour distinguer chat/rerank
     ) -> GenerationResult:
         """
         Génère du texte à partir d'un prompt.
+        
+        SPRINT 13: Enregistre les métriques Prometheus :
+        - irobot_llm_requests_total
+        - irobot_llm_tokens_total (input/output)
+        - irobot_llm_cost_usd_total
+        - irobot_llm_generation_duration_seconds
         
         Args:
             prompt: Prompt utilisateur
@@ -274,6 +301,7 @@ class MistralClient:
             max_tokens: Nombre maximum de tokens à générer
             temperature: Température de génération
             system_prompt: Prompt système optionnel
+            operation: Type d'opération ("chat", "rerank", "title") pour les métriques
             
         Returns:
             GenerationResult avec le contenu généré et métadonnées
@@ -302,9 +330,27 @@ class MistralClient:
             
             processing_time = time.time() - start_time
             
+            # Calculer le coût
+            cost = self.calculate_cost(
+                model=model,
+                token_count_input=usage.prompt_tokens,
+                token_count_output=usage.completion_tokens
+            )
+            
+            # SPRINT 13 - Monitoring : Enregistrer les métriques Prometheus
+            record_llm_request(
+                operation=operation,  # "chat", "rerank", ou "title"
+                model=model,
+                input_tokens=usage.prompt_tokens,
+                output_tokens=usage.completion_tokens,
+                cost_usd=cost['cost_total'],
+                duration=processing_time
+            )
+            
             logger.debug(
-                f"Generation: {usage.prompt_tokens} in, {usage.completion_tokens} out, "
-                f"{processing_time:.2f}s"
+                f"Generation ({operation}): {usage.prompt_tokens} in, "
+                f"{usage.completion_tokens} out, {processing_time:.2f}s, "
+                f"${cost['cost_total']:.6f}"
             )
             
             return GenerationResult(
@@ -316,7 +362,7 @@ class MistralClient:
             )
             
         except Exception as e:
-            logger.error(f"Erreur génération: {e}")
+            logger.error(f"Erreur génération ({operation}): {e}")
             raise
     
     def calculate_cost(

@@ -47,5 +47,10 @@ celery_app.conf.update(
             "task": "app.workers.periodic_tasks.cleanup_old_logs",
             "schedule": 86400.0,  # 24 hours
         },
+        "collect-infrastructure-metrics": {
+            "task": "app.core.metrics_collector.collect_infrastructure_metrics",
+            "schedule": 30.0,  # Toutes les 30 secondes
+            "options": {"queue": "default"},
+        },
     },
 )
