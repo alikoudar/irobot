@@ -9,7 +9,8 @@ from app.api.v1.endpoints import (auth,
                                   dashboard,
                                   manager_dashboard,
                                   config,
-                                  metrics_endpoint)
+                                  metrics_endpoint,
+                                  audit_logs)
 
 # Créer le router principal v1
 api_router = APIRouter()
@@ -65,4 +66,9 @@ api_router.include_router(
 api_router.include_router(
     metrics_endpoint.router,
     tags=["Monitoring"]
+)
+
+api_router.include_router(
+    audit_logs.router,
+    tags=["Audit Logs"]
 )

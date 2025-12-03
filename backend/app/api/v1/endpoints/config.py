@@ -270,8 +270,8 @@ async def update_config(
         # Créer un log d'audit
         audit_log = AuditLog(
             user_id=current_user.id,
-            action="UPDATE",
-            entity_type="config",
+            action="CONFIG_UPDATE",
+            entity_type="CONFIG",
             entity_id=updated_config.id,
             details={
                 "key": key,
