@@ -377,8 +377,8 @@ const getRoleLabel = (role) => {
 }
 
 const getRoleType = (role) => {
-  const types = { ADMIN: 'danger', MANAGER: 'warning', USER: '' }
-  return types[role] || ''
+  const types = { ADMIN: 'danger', MANAGER: 'warning', USER: 'info' }
+  return types[role] || 'info'
 }
 
 const formatDate = (dateString) => {

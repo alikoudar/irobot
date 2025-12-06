@@ -1,5 +1,264 @@
 # CHANGELOG
 
+## [1.0.0-sprint14] - 2025-12-06
+
+**Résumé** : Système de notifications temps réel avec SSE, notifications documents/utilisateurs/feedbacks, et polling pour workers Celery.
+
+### ✅ **Backend - Modèle & Service Notifications**
+
+#### Modèle Notification
+- **backend/app/models/notification.py** :
+  - Modèle SQLAlchemy `Notification` avec UUID, user_id, type, priority
+  - Enums : `NotificationType` (12 types), `NotificationPriority` (4 niveaux)
+  - Champs : title, message, data (JSON), is_read, is_dismissed, expires_at
+  - Propriétés calculées : icon, color selon type/priorité
+  - Méthodes : `mark_as_read()`, `dismiss()`, `to_dict()`
+
+#### Migration Alembic
+- **alembic/versions/xxx_add_notifications.py** :
+  - Table `notifications` avec indexes optimisés
+  - Index composite (user_id, is_read, created_at)
+  - Index sur type et priority
+
+#### Service NotificationService
+- **backend/app/services/notification.py** (~1400 lignes) :
+  - SSE Manager singleton avec connexions par utilisateur
+  - Méthodes CRUD : create, get, update, delete
+  - Broadcast : `broadcast_to_admins()`, `broadcast_to_admins_and_managers()`
+  - Notifications prédéfinies : 
+    - `notify_document_completed()` - Traitement terminé
+    - `notify_document_failed()` - Échec traitement
+    - `notify_document_uploaded()` - Upload confirmé
+    - `notify_user_created()` - Nouvel utilisateur
+    - `notify_user_deleted()` - Suppression utilisateur
+    - `notify_user_activated()` - Activation compte
+    - `notify_user_deactivated()` - Désactivation compte
+    - `notify_feedback_received()` - Nouveau feedback
+  - Streaming SSE avec heartbeat 30s
+  - Gestion rôles : USER voit ses notifs, MANAGER voit documents, ADMIN voit tout
+
+#### Endpoints API
+- **backend/app/api/v1/endpoints/notifications.py** (~850 lignes) :
+  - `GET /notifications` - Liste paginée avec filtres
+  - `GET /notifications/unread-count` - Compteur non lues
+  - `GET /notifications/stream` - Stream SSE temps réel
+  - `POST /notifications/{id}/read` - Marquer comme lue
+  - `POST /notifications/read-all` - Marquer toutes lues
+  - `POST /notifications/{id}/dismiss` - Rejeter notification
+  - `POST /notifications/dismiss-all` - Rejeter toutes
+  - `DELETE /notifications/{id}` - Supprimer une notification
+  - `DELETE /notifications/read` - Supprimer toutes les lues
+  - `POST /notifications/test-sse` - Test endpoint (admin)
+
+#### Schemas Pydantic
+- **backend/app/schemas/notification_schemas.py** :
+  - `NotificationCreate`, `NotificationUpdate`
+  - `NotificationResponse`, `NotificationListResponse`
+  - `NotificationFilters`, `NotificationBulkAction`
+  - `SSEEvent`, `NotificationBulkResponse`
+
+### ✅ **Backend - Intégration Services**
+
+#### UserService
+- **backend/app/services/user_service.py** :
+  - Helper `_send_notification_in_thread()` pour contexte synchrone
+  - Notifications : création, activation, désactivation, suppression utilisateur
+  - Broadcast aux admins pour toutes les actions utilisateurs
+
+#### ChatService
+- **backend/app/services/chat_service.py** :
+  - Notification feedback négatif aux admins
+  - Intégration threading pour éviter problèmes session DB
+
+#### Workers Celery
+- **backend/app/workers/indexing_tasks.py** :
+  - `_send_notification_in_thread()` avec `asyncio.run()`
+  - `notify_document_completed()` après indexation réussie
+  - `notify_document_failed()` après échec
+  - `broadcast_sse=False` car SSE manager dans processus séparé
+
+### ✅ **Frontend - Store Notifications**
+
+#### Store Pinia
+- **frontend/src/stores/notifications.js** (~740 lignes) :
+  - State : notifications, unreadCount, sseConnected, settings
+  - Getters : sortedNotifications, unreadNotifications, hasUnread
+  - Actions API : fetchNotifications, markAsRead, markAllAsRead, dismiss, dismissAll
+  - SSE : connectSSE, disconnectSSE avec reconnexion auto
+  - Polling : 10 secondes pour notifications workers Celery
+  - Popups : ElNotification avec son et durée configurable
+  - Helpers : getNotificationColor, getNotificationIcon, formatRelativeTime
+
+#### Service API
+- **frontend/src/services/api/notifications.js** :
+  - getNotifications, getUnreadCount
+  - markAsRead, markAllAsRead
+  - dismiss, dismissAll
+  - deleteNotification, deleteAllRead
+
+### ✅ **Frontend - Composants UI**
+
+#### NotificationBadge
+- **frontend/src/components/notifications/NotificationBadge.vue** :
+  - Badge avec compteur non lues
+  - Icône cloche avec animation
+  - Indicateur connexion SSE (point vert/rouge)
+
+#### NotificationPanel
+- **frontend/src/components/notifications/NotificationPanel.vue** :
+  - Panel dropdown avec liste notifications
+  - Actions : marquer lu, rejeter, tout marquer lu
+  - Boutons : "Tout effacer", "Voir tout"
+  - Scroll infini avec pagination
+
+#### NotificationItem
+- **frontend/src/components/notifications/NotificationItem.vue** :
+  - Affichage notification avec icône, titre, message
+  - Badge non lu (point bleu)
+  - Temps relatif (À l'instant, Il y a 5 min, etc.)
+  - Actions hover : marquer lu, rejeter
+
+#### NotificationSettings
+- **frontend/src/components/notifications/NotificationSettings.vue** :
+  - Toggle son activé/désactivé
+  - Toggle popups activé/désactivé
+  - Durée popup configurable
+
+#### AppLayout
+- **frontend/src/layouts/AppLayout.vue** :
+  - Intégration NotificationBadge dans navbar
+  - `await fetchNotifications()` avant `connectSSE()`
+  - Watcher reconnexion au changement utilisateur
+
+### 🐛 **Corrections Sprint 14**
+
+#### Bug #1 : Doublon notifications admin
+**Problème** : Admin recevait 2 notifications (personnelle + broadcast) pour ses propres uploads
+
+**Solution** : 
+- USER → Notification personnelle uniquement
+- ADMIN/MANAGER → Broadcast uniquement (pas de doublon)
+
+#### Bug #2 : SSE broadcast depuis workers Celery
+**Problème** : `sse_manager` singleton en mémoire, workers dans processus séparé
+
+**Solution** :
+- `broadcast_sse=False` depuis workers
+- Polling frontend 10 secondes pour détecter nouvelles notifications
+
+#### Bug #3 : Badge non affiché systématiquement
+**Problème** : Race condition entre `fetchNotifications()` et SSE "connected"
+
+**Solution** :
+- `await fetchNotifications()` AVANT `connectSSE()`
+- SSE "connected" n'écrase plus unreadCount si déjà initialisé
+
+#### Bug #4 : Managers et notifications documents
+**Problème** : Managers ne recevaient pas les notifications documents
+
+**Solution** :
+- Nouvelle méthode `broadcast_to_admins_and_managers()` pour documents
+- `get_user_notifications()` filtre par type pour managers
+
+#### Bug #5 : Accolade en double dans store
+**Problème** : Erreur syntaxe JS `} }` dans notifications.js
+
+**Solution** : Suppression accolade en trop
+
+### 📊 **Statistiques Sprint 14**
+
+**Backend** :
+- Fichiers créés : 4 (model, service, endpoints, schemas)
+- Fichiers modifiés : 4 (user_service, chat_service, indexing_tasks, main)
+- Lignes de code : ~3500 lignes
+- Endpoints API : 11 endpoints
+- Types notifications : 12 types
+
+**Frontend** :
+- Fichiers créés : 6 (store, service, 4 composants)
+- Fichiers modifiés : 2 (AppLayout, router)
+- Lignes de code : ~1500 lignes
+- Composants : 5 composants
+
+**Base de données** :
+- Tables : 1 (notifications)
+- Indexes : 4 indexes
+- Migration : 1 fichier Alembic
+
+### 🎯 **Fonctionnalités par Rôle**
+
+| Notification | USER | MANAGER | ADMIN |
+|--------------|------|---------|-------|
+| Mes documents traités | ✅ | ✅ | ✅ |
+| Tous les documents | ❌ | ✅ | ✅ |
+| Gestion utilisateurs | ❌ | ❌ | ✅ |
+| Feedbacks négatifs | ❌ | ❌ | ✅ |
+| Alertes système | ❌ | ❌ | ✅ |
+
+### 🔧 **Configuration**
+
+```python
+# Polling interval (frontend)
+POLLING_INTERVAL = 10000  # 10 secondes
+
+# SSE Heartbeat (backend)
+HEARTBEAT_INTERVAL = 30  # secondes
+
+# Notification expiration (optionnel)
+DEFAULT_EXPIRATION = None  # Pas d'expiration par défaut
+```
+
+### 🚀 **Migration depuis Sprint 13**
+
+```bash
+# 1. Migration base de données
+docker-compose exec backend alembic upgrade head
+
+# 2. Copier fichiers backend
+cp notification.py backend/app/models/
+cp notification_schemas.py backend/app/schemas/
+cp notification.py backend/app/services/  # service
+cp notifications.py backend/app/api/v1/endpoints/
+cp user_service.py backend/app/services/
+cp chat_service.py backend/app/services/
+cp indexing_tasks.py backend/app/workers/
+
+# 3. Copier fichiers frontend
+cp notifications.js frontend/src/stores/
+cp notifications.js frontend/src/services/api/  # service API
+cp NotificationBadge.vue frontend/src/components/notifications/
+cp NotificationPanel.vue frontend/src/components/notifications/
+cp NotificationItem.vue frontend/src/components/notifications/
+cp NotificationSettings.vue frontend/src/components/notifications/
+cp AppLayout.vue frontend/src/layouts/
+
+# 4. Mettre à jour main.py (ajouter router)
+# from app.api.v1.endpoints import notifications
+# app.include_router(notifications.router, prefix="/api/v1/notifications", tags=["notifications"])
+
+# 5. Redémarrer tous les services
+docker-compose restart backend celery_worker celery_beat frontend
+
+# 6. Vérifier
+curl http://localhost:8000/api/v1/notifications/unread-count
+```
+
+### ⚠️ **Notes Importantes**
+
+1. **SSE vs Polling** : SSE fonctionne pour les actions backend (création utilisateur), polling pour les workers Celery
+2. **Délai notifications documents** : ~10 secondes max (polling)
+3. **Badge** : S'affiche uniquement si notifications non lues > 0
+4. **Sons** : Désactivables dans les paramètres utilisateur
+5. **Persistance** : Notifications stockées en DB, pas de perte au refresh
+
+### 🎯 **Prochaines Étapes (Sprint 15)**
+
+- Redis Pub/Sub pour notifications temps réel depuis workers
+- WebSocket fallback si SSE non supporté
+- Notifications push navigateur (Web Push API)
+- Préférences notifications par type
+- Historique notifications avec recherche
+
 ## [1.0.0-sprint13] - 2025-11-30
 
 **Résumé** : Monitoring & Observability complet avec Prometheus, Grafana, Loki, et corrections critiques.

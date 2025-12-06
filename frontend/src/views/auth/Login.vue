@@ -56,7 +56,6 @@
               size="large"
               show-password
               class="irobot-input"
-              @keyup.enter="handleLogin"
             />
           </el-form-item>
 

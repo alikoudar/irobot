@@ -266,6 +266,7 @@ async def create_user(
             db=db,
             user_data=user_data,
             created_by=current_user.id,
+            created_by_name=f"{current_user.prenom} {current_user.nom}",  # SPRINT 14
             ip_address=ip_address
         )
         
@@ -341,6 +342,7 @@ async def update_user(
             user_id=user_id,
             user_data=user_data,
             updated_by=current_user.id,
+            updated_by_name=f"{current_user.prenom} {current_user.nom}",  # SPRINT 14
             ip_address=ip_address
         )
         
@@ -381,6 +383,7 @@ async def delete_user(
             db=db,
             user_id=user_id,
             deleted_by=current_user.id,
+            deleted_by_name=f"{current_user.prenom} {current_user.nom}",  # SPRINT 14
             ip_address=ip_address
         )
         
@@ -436,6 +439,7 @@ async def import_users_from_excel(
             db=db,
             file=file,
             imported_by=current_user.id,
+            imported_by_name=f"{current_user.prenom} {current_user.nom}",  # SPRINT 14
             ip_address=ip_address
         )
         
@@ -480,6 +484,7 @@ async def reset_user_password(
             user_id=user_id,
             new_password=password_data.new_password,
             reset_by=current_user.id,
+            reset_by_name=f"{current_user.prenom} {current_user.nom}",  # SPRINT 14
             force_change=password_data.force_change,
             ip_address=ip_address
         )

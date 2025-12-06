@@ -22,6 +22,8 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, and_
+import asyncio
+from app.services.notification import NotificationService
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -42,6 +44,38 @@ from app.schemas.message import (
     MessageResponse
 )
 from app.schemas.conversation import ConversationResponse, ConversationSummary
+
+def _send_notification_in_thread(notification_func: str, **kwargs):
+    """
+    Exécute une notification dans un thread séparé avec sa propre session DB et event loop.
+    
+    Cette approche garantit que la notification est envoyée même si la requête
+    HTTP se termine avant.
+    
+    Args:
+        notification_func: Nom de la méthode NotificationService à appeler
+        **kwargs: Arguments à passer à la méthode (sans db)
+    """
+    import threading
+    
+    def _run_in_thread():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        db = SessionLocal()
+        try:
+            method = getattr(NotificationService, notification_func)
+            loop.run_until_complete(method(db=db, **kwargs))
+            logger.info(f"✅ Notification {notification_func} envoyée avec succès")
+        except Exception as e:
+            logger.error(f"❌ Erreur notification {notification_func}: {e}", exc_info=True)
+        finally:
+            db.close()
+            loop.close()
+    
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
+    thread.start()
+    logger.info(f"🔔 Thread notification {notification_func} démarré")
 
 # Configuration du logger
 logger = logging.getLogger(__name__)
@@ -991,7 +1025,8 @@ class ChatService:
         user_id: UUID,
         rating: str,
         comment: Optional[str],
-        db: Session
+        db: Session,
+        user_name: Optional[str] = None  # SPRINT 14 - Nouveau paramètre
     ) -> Optional[Feedback]:
         """
         Ajoute un feedback sur un message.
@@ -999,9 +1034,10 @@ class ChatService:
         Args:
             message_id: ID du message
             user_id: ID de l'utilisateur
-            rating: Type de feedback (thumbs_up/thumbs_down)
+            rating: Type de feedback (THUMBS_UP/THUMBS_DOWN)
             comment: Commentaire optionnel
             db: Session DB
+            user_name: Nom de l'utilisateur (pour notification)
         
         Returns:
             Feedback créé, None si message non trouvé
@@ -1030,29 +1066,42 @@ class ChatService:
             )
         ).first()
         
+        is_new_feedback = existing is None
+        
         if existing:
             # Mettre à jour le feedback existant
             existing.rating = FeedbackRating(rating)
             existing.comment = comment
             db.commit()
             db.refresh(existing)
-            return existing
-        
-        # Créer un nouveau feedback
-        feedback = Feedback(
-            user_id=user_id,
-            conversation_id=conversation.id,
-            message_id=message_id,
-            rating=FeedbackRating(rating),
-            comment=comment
-        )
-        db.add(feedback)
-        db.commit()
-        db.refresh(feedback)
+            feedback = existing
+        else:
+            # Créer un nouveau feedback
+            feedback = Feedback(
+                user_id=user_id,
+                conversation_id=conversation.id,
+                message_id=message_id,
+                rating=FeedbackRating(rating),
+                comment=comment
+            )
+            db.add(feedback)
+            db.commit()
+            db.refresh(feedback)
         
         logger.info(f"Feedback ajouté: message={message_id}, rating={rating}")
+        
+        # SPRINT 14 - Notification temps réel (seulement pour nouveaux feedbacks)
+        if is_new_feedback and user_name:
+            _send_notification_in_thread(
+                "notify_feedback_received",
+                feedback_id=feedback.id,
+                message_id=message_id,
+                user_name=user_name,
+                rating=rating,
+                comment=comment
+            )
+        
         return feedback
-    
     # =========================================================================
     # UTILITAIRES
     # =========================================================================

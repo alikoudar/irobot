@@ -10,7 +10,8 @@ from app.api.v1.endpoints import (auth,
                                   manager_dashboard,
                                   config,
                                   metrics_endpoint,
-                                  audit_logs)
+                                  audit_logs,
+                                  notifications)
 
 # Créer le router principal v1
 api_router = APIRouter()
@@ -71,4 +72,9 @@ api_router.include_router(
 api_router.include_router(
     audit_logs.router,
     tags=["Audit Logs"]
+)
+
+api_router.include_router(
+    notifications.router,
+    tags=["Notifications"]
 )

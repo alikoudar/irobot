@@ -13,6 +13,7 @@ from app.models.system_config import SystemConfig
 from app.models.query_cache import QueryCache
 from app.models.cache_document_map import CacheDocumentMap
 from app.models.cache_statistics import CacheStatistics
+from app.models.notification import NotificationType, NotificationPriority, Notification
 
 __all__ = [
     "User",
@@ -35,4 +36,7 @@ __all__ = [
     "QueryCache",
     "CacheDocumentMap",
     "CacheStatistics",
+    "NotificationType",
+    "NotificationPriority",
+    "Notification",
 ]

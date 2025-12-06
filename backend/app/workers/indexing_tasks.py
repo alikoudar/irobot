@@ -10,7 +10,9 @@ Ce worker :
 
 CORRECTION : Sépare chunks et vectors pour batch_insert()
 SPRINT 13 - MONITORING: Ajout des métriques Prometheus pour les tasks Celery
+SPRINT 14 - NOTIFICATIONS: Ajout des notifications temps réel pour les documents
 """
+import asyncio
 import logging
 import time
 from typing import Dict, Any, List
@@ -26,6 +28,9 @@ from app.core.metrics import (
     record_celery_task,
 )
 
+# SPRINT 14 - Notifications (import corrigé)
+from app.services.notification import NotificationService, DocumentStatusSSE
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +40,52 @@ logger = logging.getLogger(__name__)
 
 # Taille des batches pour l'indexation Weaviate
 WEAVIATE_BATCH_SIZE = 100
+
+
+# =============================================================================
+# HELPER POUR NOTIFICATIONS ASYNC - CORRIGÉ SPRINT 14 V3
+# =============================================================================
+
+def _send_notification_in_thread(notification_func: str, **kwargs):
+    """
+    Exécute une notification de manière synchrone avec sa propre session DB.
+    
+    IMPORTANT: Depuis un worker Celery, le broadcast SSE ne fonctionne pas
+    car le SSE manager est dans un processus différent (FastAPI).
+    La notification est créée en DB sans broadcast - le frontend la récupère
+    via polling ou au prochain refresh.
+    
+    Args:
+        notification_func: Nom de la méthode NotificationService à appeler
+        **kwargs: Arguments à passer à la méthode (sans db)
+    """
+    async def _run_notification():
+        db = SessionLocal()
+        try:
+            method = getattr(NotificationService, notification_func)
+            # Appeler avec broadcast_sse=False car on est dans un autre processus
+            # Le SSE manager ici n'a pas les connexions des clients
+            await method(db=db, **kwargs)
+            logger.info(f"✅ Notification {notification_func} créée en DB")
+        except Exception as e:
+            logger.error(f"❌ Erreur notification {notification_func}: {e}", exc_info=True)
+        finally:
+            db.close()
+    
+    try:
+        asyncio.run(_run_notification())
+    except Exception as e:
+        logger.error(f"❌ Échec total notification {notification_func}: {e}", exc_info=True)
+
+
+def _send_sse_status_update(document_id: str, **kwargs):
+    """
+    Envoie une mise à jour de status document via SSE.
+    
+    NOTE: Depuis un worker Celery, ceci ne fonctionne pas car le SSE manager
+    est dans le processus FastAPI. Cette fonction log simplement l'intention.
+    """
+    logger.info(f"📢 Document {document_id} status update: {kwargs.get('status', 'N/A')}")
 
 
 # =============================================================================
@@ -62,6 +113,26 @@ class IndexingTask(Task):
                 document.processing_stage = ProcessingStage.INDEXING
                 document.error_message = error_message[:1000]
                 db.commit()
+                
+                # SPRINT 14 - Notification d'échec (corrigé)
+                _send_notification_in_thread(
+                    "notify_document_failed",
+                    document_id=document.id,
+                    filename=document.original_filename,
+                    user_id=document.uploaded_by,
+                    error_message=error_message[:200],
+                    broadcast_sse=False  # Pas de broadcast SSE depuis le worker Celery
+                )
+                
+                # Envoyer aussi via SSE document status
+                _send_sse_status_update(
+                    document_id=str(document.id),
+                    status="FAILED",
+                    progress=0,
+                    original_filename=document.original_filename,
+                    error_message=error_message[:200]
+                )
+                
         except Exception as e:
             logger.error(f"Échec mise à jour status document: {e}")
             db.rollback()
@@ -100,6 +171,10 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
     - irobot_celery_tasks_total{queue="indexing",status="success/failure"}
     - irobot_celery_task_duration_seconds{queue="indexing"}
     
+    SPRINT 14: Envoie des notifications temps réel :
+    - notify_document_completed / notify_document_failed
+    - DocumentStatusSSE.send_status_update
+    
     Args:
         document_id: UUID du document
         
@@ -131,6 +206,15 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
         document.status = DocumentStatus.PROCESSING
         document.processing_stage = ProcessingStage.INDEXING
         db.commit()
+        
+        # SPRINT 14 - Notification de début d'indexation
+        _send_sse_status_update(
+            document_id=str(document_id),
+            status="PROCESSING",
+            progress=10,
+            stage="INDEXING",
+            original_filename=document.original_filename
+        )
         
         # Charger les chunks
         chunks = db.query(Chunk).filter(
@@ -232,6 +316,16 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
                 f"({len(batch_chunks)} chunks)"
             )
             
+            # SPRINT 14 - Mise à jour progression SSE
+            progress = 10 + int((batch_num / total_batches) * 80)  # 10% à 90%
+            _send_sse_status_update(
+                document_id=str(document_id),
+                status="PROCESSING",
+                progress=progress,
+                stage="INDEXING",
+                original_filename=document.original_filename
+            )
+            
             # CORRECTION : Passer chunks ET vectors séparément
             result = weaviate_client.batch_insert(batch_chunks, batch_vectors)
             
@@ -305,6 +399,26 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
             status="success"
         )
         
+        # SPRINT 14 - Notifications temps réel de succès
+        _send_notification_in_thread(
+            "notify_document_completed",
+            document_id=document.id,
+            filename=document.original_filename,
+            user_id=document.uploaded_by,
+            total_chunks=total_indexed,
+            processing_time=total_processing_time,
+            broadcast_sse=False  # Pas de broadcast SSE depuis le worker Celery
+        )
+        
+        _send_sse_status_update(
+            document_id=str(document_id),
+            status="COMPLETED",
+            progress=100,
+            original_filename=document.original_filename,
+            total_chunks=total_indexed,
+            processing_time=total_processing_time
+        )
+        
         return {
             "document_id": str(document_id),
             "status": "success",
@@ -337,6 +451,25 @@ def index_to_weaviate(self, document_id: str) -> Dict[str, Any]:
                 document.error_message = str(e)[:1000]
                 document.retry_count = (document.retry_count or 0) + 1
                 db.commit()
+                
+                # SPRINT 14 - Notification d'échec
+                _send_notification_in_thread(
+                    "notify_document_failed",
+                    document_id=document.id,
+                    filename=document.original_filename,
+                    user_id=document.uploaded_by,
+                    error_message=str(e)[:200],
+                    broadcast_sse=False  # Pas de broadcast SSE depuis le worker Celery
+                )
+                
+                _send_sse_status_update(
+                    document_id=str(document_id),
+                    status="FAILED",
+                    progress=0,
+                    original_filename=document.original_filename,
+                    error_message=str(e)[:200]
+                )
+                
         except Exception:
             db.rollback()
         

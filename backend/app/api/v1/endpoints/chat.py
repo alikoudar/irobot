@@ -665,7 +665,8 @@ async def add_feedback(
         user_id=current_user.id,
         rating=request.rating.value,
         comment=request.comment,
-        db=db
+        db=db,
+        user_name=f"{current_user.prenom} {current_user.nom}"  # SPRINT 14
     )
     
     if not feedback:

@@ -1,4 +1,10 @@
-"""Service de gestion des utilisateurs - CRUD, Import Excel, Gestion mots de passe."""
+"""Service de gestion des utilisateurs - CRUD, Import Excel, Gestion mots de passe.
+
+SPRINT 14 : Ajout des notifications temps réel pour les opérations CRUD.
+"""
+import asyncio
+import logging
+import threading
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -19,6 +25,50 @@ from app.schemas.user import (
     UserResponse,
     UserStatsResponse
 )
+
+# SPRINT 14 - Notifications
+from app.services.notification import NotificationService
+from app.db.session import SessionLocal
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# HELPER POUR NOTIFICATIONS ASYNC - CORRIGÉ SPRINT 14 V2
+# =============================================================================
+
+def _send_notification_in_thread(notification_func: str, **kwargs):
+    """
+    Exécute une notification dans un thread séparé avec sa propre session DB et event loop.
+    
+    Cette approche garantit que la notification est envoyée même si la requête
+    HTTP se termine avant.
+    
+    Args:
+        notification_func: Nom de la méthode NotificationService à appeler
+        **kwargs: Arguments à passer à la méthode (sans db)
+    """
+    def _run_in_thread():
+        # Créer une nouvelle event loop pour ce thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        db = SessionLocal()
+        try:
+            method = getattr(NotificationService, notification_func)
+            # Exécuter la coroutine dans la loop de ce thread
+            loop.run_until_complete(method(db=db, **kwargs))
+            logger.info(f"✅ Notification {notification_func} envoyée avec succès")
+        except Exception as e:
+            logger.error(f"❌ Erreur notification {notification_func}: {e}", exc_info=True)
+        finally:
+            db.close()
+            loop.close()
+    
+    # Lancer dans un thread séparé pour ne pas bloquer
+    thread = threading.Thread(target=_run_in_thread, daemon=True)
+    thread.start()
+    logger.info(f"🔔 Thread notification {notification_func} démarré")
 
 
 class UserService:
@@ -124,6 +174,7 @@ class UserService:
         db: Session,
         user_data: UserCreate,
         created_by: Optional[UUID] = None,
+        created_by_name: Optional[str] = None,
         ip_address: Optional[str] = None
     ) -> User:
         """
@@ -133,6 +184,7 @@ class UserService:
             db: Session de base de données
             user_data: Données de l'utilisateur à créer
             created_by: ID de l'utilisateur créateur (admin)
+            created_by_name: Nom complet du créateur (pour notification)
             ip_address: Adresse IP de la requête
             
         Returns:
@@ -191,6 +243,18 @@ class UserService:
         db.add(audit_log)
         db.commit()
         
+        # SPRINT 14 - Notification temps réel
+        if created_by_name:
+            _send_notification_in_thread(
+                "notify_user_created",
+                created_user_id=new_user.id,
+                matricule=new_user.matricule,
+                nom=new_user.nom,
+                prenom=new_user.prenom,
+                role=new_user.role.value,
+                created_by_name=created_by_name
+            )
+        
         return new_user
     
     @staticmethod
@@ -199,6 +263,7 @@ class UserService:
         user_id: UUID,
         user_data: UserUpdate,
         updated_by: UUID,
+        updated_by_name: Optional[str] = None,
         ip_address: Optional[str] = None
     ) -> User:
         """
@@ -209,6 +274,7 @@ class UserService:
             user_id: ID de l'utilisateur à mettre à jour
             user_data: Nouvelles données
             updated_by: ID de l'utilisateur effectuant la modification
+            updated_by_name: Nom complet du modificateur (pour notification)
             ip_address: Adresse IP de la requête
             
         Returns:
@@ -232,6 +298,9 @@ class UserService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"L'email {user_data.email} est déjà utilisé"
                 )
+        
+        # Sauvegarder l'ancien état pour détecter activation/désactivation
+        was_active = user.is_active
         
         # Mettre à jour les champs
         update_data = user_data.model_dump(exclude_unset=True)
@@ -258,6 +327,40 @@ class UserService:
         db.add(audit_log)
         db.commit()
         
+        # SPRINT 14 - Notifications temps réel
+        if updated_by_name:
+            # Vérifier si c'est une activation/désactivation
+            if "is_active" in update_data and was_active != user.is_active:
+                if user.is_active:
+                    _send_notification_in_thread(
+                        "notify_user_activated",
+                        user_id=user.id,
+                        matricule=user.matricule,
+                        nom=user.nom,
+                        prenom=user.prenom,
+                        activated_by_name=updated_by_name
+                    )
+                else:
+                    _send_notification_in_thread(
+                        "notify_user_deactivated",
+                        user_id=user.id,
+                        matricule=user.matricule,
+                        nom=user.nom,
+                        prenom=user.prenom,
+                        deactivated_by_name=updated_by_name
+                    )
+            else:
+                # Mise à jour normale
+                _send_notification_in_thread(
+                    "notify_user_updated",
+                    updated_user_id=user.id,
+                    matricule=user.matricule,
+                    nom=user.nom,
+                    prenom=user.prenom,
+                    updated_by_name=updated_by_name,
+                    changes={"fields_updated": list(update_data.keys())}
+                )
+        
         return user
     
     @staticmethod
@@ -265,6 +368,7 @@ class UserService:
         db: Session,
         user_id: UUID,
         deleted_by: UUID,
+        deleted_by_name: Optional[str] = None,
         ip_address: Optional[str] = None
     ) -> None:
         """
@@ -274,6 +378,7 @@ class UserService:
             db: Session de base de données
             user_id: ID de l'utilisateur à supprimer
             deleted_by: ID de l'utilisateur effectuant la suppression
+            deleted_by_name: Nom complet du suppresseur (pour notification)
             ip_address: Adresse IP de la requête
             
         Raises:
@@ -298,6 +403,12 @@ class UserService:
                     detail="Impossible de supprimer le dernier administrateur actif"
                 )
         
+        # Sauvegarder les infos avant suppression pour la notification
+        deleted_matricule = user.matricule
+        deleted_nom = user.nom
+        deleted_prenom = user.prenom
+        deleted_id = user.id
+        
         # Log d'audit avant suppression
         audit_log = AuditLog(
             user_id=deleted_by,
@@ -316,6 +427,17 @@ class UserService:
         # Supprimer l'utilisateur
         db.delete(user)
         db.commit()
+        
+        # SPRINT 14 - Notification temps réel (après commit car user supprimé)
+        if deleted_by_name:
+            _send_notification_in_thread(
+                "notify_user_deleted",
+                deleted_user_id=deleted_id,
+                matricule=deleted_matricule,
+                nom=deleted_nom,
+                prenom=deleted_prenom,
+                deleted_by_name=deleted_by_name
+            )
     
     @staticmethod
     def change_password(
@@ -386,6 +508,7 @@ class UserService:
         user_id: UUID,
         new_password: str,
         reset_by: UUID,
+        reset_by_name: Optional[str] = None,
         force_change: bool = True,
         ip_address: Optional[str] = None
     ) -> None:
@@ -397,6 +520,7 @@ class UserService:
             user_id: ID de l'utilisateur
             new_password: Nouveau mot de passe
             reset_by: ID de l'admin effectuant la réinitialisation
+            reset_by_name: Nom complet de l'admin (pour notification)
             force_change: Forcer le changement au prochain login
             ip_address: Adresse IP de la requête
             
@@ -434,12 +558,24 @@ class UserService:
         )
         db.add(audit_log)
         db.commit()
+        
+        # SPRINT 14 - Notification temps réel
+        if reset_by_name:
+            _send_notification_in_thread(
+                "notify_user_password_reset",
+                user_id=user.id,
+                matricule=user.matricule,
+                nom=user.nom,
+                prenom=user.prenom,
+                reset_by_name=reset_by_name
+            )
     
     @staticmethod
     async def import_users_from_excel(
         db: Session,
         file: UploadFile,
         imported_by: UUID,
+        imported_by_name: Optional[str] = None,
         ip_address: Optional[str] = None
     ) -> UserImportResult:
         """
@@ -457,6 +593,7 @@ class UserService:
             db: Session de base de données
             file: Fichier Excel
             imported_by: ID de l'admin effectuant l'import
+            imported_by_name: Nom complet de l'importateur (pour notifications)
             ip_address: Adresse IP de la requête
             
         Returns:
@@ -515,10 +652,12 @@ class UserService:
                     is_active=True
                 )
                 
+                # Note: Les notifications sont envoyées dans create_user
                 user = UserService.create_user(
                     db=db,
                     user_data=user_data,
                     created_by=imported_by,
+                    created_by_name=imported_by_name,
                     ip_address=ip_address
                 )
                 

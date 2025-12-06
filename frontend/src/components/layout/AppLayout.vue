@@ -166,41 +166,45 @@
         </div>
 
         <div class="navbar-right">
-          <!-- Notifications -->
-          <el-dropdown trigger="click" @command="handleNotificationCommand">
-            <el-badge :value="notificationCount" class="navbar-badge" :hidden="notificationCount === 0">
-              <el-button link class="navbar-btn">
-                <el-icon :size="20">
-                  <Bell />
-                </el-icon>
-              </el-button>
-            </el-badge>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <div class="notifications-header">
-                  <span>Notifications</span>
-                  <el-button link size="small" @click="clearNotifications">
-                    Tout effacer
-                  </el-button>
-                </div>
-                <el-dropdown-item v-for="notif in notifications" :key="notif.id" :command="notif.id">
-                  <div class="notification-item">
-                    <el-icon :color="notif.color"><component :is="notif.icon" /></el-icon>
-                    <div class="notification-content">
-                      <p class="notification-title">{{ notif.title }}</p>
-                      <p class="notification-time">{{ notif.time }}</p>
-                    </div>
-                  </div>
-                </el-dropdown-item>
-                <el-dropdown-item v-if="notifications.length === 0" disabled>
-                  <div class="no-notifications">
-                    <el-icon :size="32" color="#cbd5e1"><Bell /></el-icon>
-                    <p>Aucune notification</p>
-                  </div>
-                </el-dropdown-item>
-              </el-dropdown-menu>
+          <!-- Indicateur SSE (visible pour debug, peut être masqué) -->
+          <el-tooltip 
+            :content="sseConnected ? 'Temps réel actif' : 'Temps réel inactif'"
+            placement="bottom"
+          >
+            <div class="sse-status" :class="{ connected: sseConnected }">
+              <span class="sse-dot"></span>
+            </div>
+          </el-tooltip>
+
+          <!-- Notifications - SPRINT 14 -->
+          <el-popover
+            placement="bottom-end"
+            :width="380"
+            trigger="click"
+            :show-arrow="false"
+            popper-class="notification-popover"
+          >
+            <template #reference>
+              <el-badge 
+                :value="unreadCount" 
+                class="navbar-badge" 
+                :hidden="unreadCount === 0"
+                :max="99"
+              >
+                <el-button link class="navbar-btn">
+                  <el-icon :size="20">
+                    <Bell />
+                  </el-icon>
+                </el-button>
+              </el-badge>
             </template>
-          </el-dropdown>
+            
+            <!-- Panel de notifications -->
+            <NotificationPanel 
+              @notification-click="handleNotificationClick"
+              @view-all="goToNotifications"
+            />
+          </el-popover>
 
           <!-- User dropdown -->
           <el-dropdown trigger="click" @command="handleUserCommand">
@@ -247,18 +251,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, markRaw } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   ChatDotRound,
   Clock,
   ChatLineSquare,
-  Folder,           // 📁 Gestion Contenu (Management)
+  Folder,
   Document,
   CollectionTag,
-  Tools,            // 🔧 Administration
+  Tools,
   User,
-  Monitor,          // 🖥️ Dashboard
   TrendCharts,
   DocumentCopy,
   Setting,
@@ -270,49 +273,36 @@ import {
   SwitchButton,
   PieChart,
   DArrowLeft,
-  DArrowRight,
-  InfoFilled,
-  WarningFilled
+  DArrowRight
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
+import { useNotificationStore } from '@/stores/notifications'
+import NotificationPanel from '@/components/notifications/NotificationPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const notificationStore = useNotificationStore()
 
-// State
+// ==========================================================================
+// STATE
+// ==========================================================================
+
 const sidebarCollapsed = ref(false)
-const notificationCount = ref(3)
 
-// Utiliser markRaw pour éviter les warnings Vue
-const notifications = ref([
-  {
-    id: 1,
-    title: 'Nouveau document disponible',
-    time: 'Il y a 5 minutes',
-    icon: markRaw(InfoFilled),
-    color: '#3b82f6'
-  },
-  {
-    id: 2,
-    title: 'Mise à jour système programmée',
-    time: 'Il y a 1 heure',
-    icon: markRaw(WarningFilled),
-    color: '#f59e0b'
-  },
-  {
-    id: 3,
-    title: 'Sauvegarde complétée',
-    time: 'Il y a 2 heures',
-    icon: markRaw(InfoFilled),
-    color: '#10b981'
-  }
-])
+// ==========================================================================
+// COMPUTED - Notifications (SPRINT 14)
+// ==========================================================================
 
-// ============================================================================
+/** Nombre de notifications non lues */
+const unreadCount = computed(() => notificationStore.unreadCount)
+
+/** Connexion SSE active */
+const sseConnected = computed(() => notificationStore.sseConnected)
+
+// ==========================================================================
 // PERMISSIONS CUMULATIVES
-// ============================================================================
+// ==========================================================================
 
 /**
  * Système de permissions cumulatif :
@@ -337,9 +327,9 @@ const isUser = computed(() => {
   return authStore.currentUser?.role !== undefined
 })
 
-// ============================================================================
-// COMPUTED
-// ============================================================================
+// ==========================================================================
+// COMPUTED - Navigation
+// ==========================================================================
 
 const activeMenu = computed(() => route.path)
 
@@ -351,9 +341,9 @@ const breadcrumbs = computed(() => {
   }))
 })
 
-// ============================================================================
-// METHODS
-// ============================================================================
+// ==========================================================================
+// METHODS - Sidebar
+// ==========================================================================
 
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
@@ -364,18 +354,40 @@ const handleMenuSelect = (index) => {
   router.push(index)
 }
 
-const handleNotificationCommand = (command) => {
-  const notif = notifications.value.find(n => n.id === command)
-  if (notif) {
-    ElMessage.info(notif.title)
+// ==========================================================================
+// METHODS - Notifications (SPRINT 14)
+// ==========================================================================
+
+/**
+ * Gérer le clic sur une notification
+ */
+const handleNotificationClick = (notification) => {
+  // Navigation selon le type de notification
+  if (notification.data?.document_id) {
+    router.push(`/documents?id=${notification.data.document_id}`)
+  } else if (notification.data?.feedback_id) {
+    if (isAdmin.value) {
+      router.push('/admin/feedbacks')
+    } else {
+      router.push('/feedbacks')
+    }
+  } else if (notification.data?.conversation_id) {
+    router.push(`/chat?conversation=${notification.data.conversation_id}`)
   }
 }
 
-const clearNotifications = () => {
-  notifications.value = []
-  notificationCount.value = 0
-  ElMessage.success('Notifications effacées')
+/**
+ * Aller à la page des notifications
+ */
+const goToNotifications = () => {
+  // TODO: Créer une page dédiée aux notifications si nécessaire
+  // Pour l'instant, on peut simplement afficher un message
+  console.log('Voir toutes les notifications')
 }
+
+// ==========================================================================
+// METHODS - User
+// ==========================================================================
 
 const handleUserCommand = async (command) => {
   switch (command) {
@@ -386,6 +398,9 @@ const handleUserCommand = async (command) => {
       router.push('/change-password')
       break
     case 'logout':
+      // Déconnecter SSE avant logout
+      notificationStore.disconnectSSE()
+      notificationStore.reset()
       await authStore.logout()
       router.push('/login')
       break
@@ -401,21 +416,49 @@ const getRoleLabel = (role) => {
   return labels[role] || role
 }
 
-// ============================================================================
+// ==========================================================================
 // LIFECYCLE
-// ============================================================================
+// ==========================================================================
 
-onMounted(() => {
+onMounted(async () => {
   // Restaurer l'état du sidebar
   const saved = localStorage.getItem('sidebar-collapsed')
   if (saved !== null) {
     sidebarCollapsed.value = saved === 'true'
   }
+  
+  // Connecter aux notifications SSE
+  if (authStore.isAuthenticated) {
+    // D'abord charger les notifications (et le compteur)
+    await notificationStore.fetchNotifications()
+    // Ensuite connecter au SSE pour les mises à jour temps réel
+    notificationStore.connectSSE()
+  }
 })
+
+onUnmounted(() => {
+  // Note: Ne pas déconnecter SSE ici car le layout peut être remonté
+})
+
+// Reconnecter SSE si l'utilisateur change
+watch(
+  () => authStore.currentUser,
+  async (newUser, oldUser) => {
+    if (newUser && newUser.id !== oldUser?.id) {
+      // Nouvel utilisateur, reconnecter SSE
+      notificationStore.reset()
+      await notificationStore.fetchNotifications()
+      notificationStore.connectSSE()
+    } else if (!newUser && oldUser) {
+      // Déconnexion
+      notificationStore.disconnectSSE()
+      notificationStore.reset()
+    }
+  }
+)
 </script>
 
 <style scoped lang="scss">
-// ... (même CSS que précédemment)
 .app-layout {
   display: flex;
   height: 100vh;
@@ -634,6 +677,27 @@ onMounted(() => {
         align-items: center;
         gap: 16px;
 
+        .sse-status {
+          width: 12px;
+          height: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          
+          .sse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            animation: pulse 2s infinite;
+          }
+          
+          &.connected .sse-dot {
+            background-color: #10b981;
+            animation: none;
+          }
+        }
+
         .navbar-btn {
           color: var(--text-secondary);
           padding: 8px;
@@ -695,48 +759,12 @@ onMounted(() => {
   }
 }
 
-:deep(.notifications-header) {
-  padding: 12px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-bottom: 1px solid var(--border-color);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-:deep(.notification-item) {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 8px 0;
-
-  .notification-content {
-    flex: 1;
-
-    .notification-title {
-      margin: 0 0 4px 0;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-primary);
-    }
-
-    .notification-time {
-      margin: 0;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
   }
-}
-
-:deep(.no-notifications) {
-  text-align: center;
-  padding: 32px 16px;
-  color: var(--text-secondary);
-
-  p {
-    margin: 8px 0 0 0;
-    font-size: 14px;
+  50% {
+    opacity: 0.5;
   }
 }
 
@@ -781,5 +809,14 @@ onMounted(() => {
   &:hover {
     background: var(--scrollbar-thumb-hover);
   }
+}
+</style>
+
+<style>
+/* Style global pour le popover de notifications */
+.notification-popover {
+  padding: 0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15) !important;
 }
 </style>
